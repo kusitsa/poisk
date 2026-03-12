@@ -2,188 +2,222 @@ import streamlit as st
 import requests
 import uuid
 import pytz
+import re
 from datetime import datetime
+import streamlit.components.v1 as components
 
-# 1. КОНФИГУРАЦИЯ СТРАНИЦЫ
-st.set_page_config(page_title="КУСИЦА", page_icon="🔍", layout="wide")
+# 1. КОНФИГУРАЦИЯ И СТИЛИ
+st.set_page_config(page_title="КУСИЦА — Супер Поиск", page_icon="🔍", layout="wide")
 
-# 2. АДАПТИВНЫЙ ДИЗАЙН (CSS)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap');
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #fff; }
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #fff; color: #000; }
     
-    /* Лого и Хедер */
-    .logo { font-size: 32px; font-weight: 900; letter-spacing: -2px; color: #000; }
-    .informer-box { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 15px; }
-    .informer-item { background: #f2f2f4; padding: 4px 8px; border-radius: 8px; font-size: 11px; color: #555; white-space: nowrap; }
-    .currency-pill { border: 1px solid #ff4b4b; background: #fff5f5; color: #ff4b4b; font-weight: bold; }
+    .logo { font-size: 38px; font-weight: 900; letter-spacing: -2.5px; color: #000; margin-bottom: 5px; }
+    .informer-box { display: flex; flex-wrap: wrap; gap: 8px; font-size: 11px; margin-bottom: 20px; }
+    .informer-pill { background: #f2f2f4; padding: 4px 10px; border-radius: 12px; display: flex; align-items: center; gap: 4px; color: #555; }
+    .currency-red { border: 1px solid #ff4b4b; background: #fff5f5; color: #ff4b4b; font-weight: bold; padding: 2px 8px; border-radius: 10px; }
+
+    /* Конвертер Валют (Большая карточка) */
+    .converter-card {
+        background: linear-gradient(135deg, #fff 0%, #f9f9f9 100%);
+        padding: 30px; border-radius: 25px; border: 2px solid #ffdb4d;
+        margin: 20px 0; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+    }
+    .converter-value { font-size: 48px; font-weight: 900; color: #000; margin: 10px 0; }
 
     /* Поиск */
     .stTextInput > div > div > input {
-        font-size: 18px !important; padding: 15px !important;
-        border-radius: 15px !important; border: 2px solid #ffdb4d !important;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        font-size: 18px !important; padding: 20px 25px !important;
+        border-radius: 28px !important; border: 2px solid #ffdb4d !important;
     }
     .stButton > button {
-        height: 52px; width: 100%; border-radius: 15px;
-        background-color: #ffdb4d; color: black; border: none; font-size: 20px; font-weight: bold;
+        height: 56px; width: 100%; border-radius: 28px;
+        background-color: #ffdb4d; color: black; border: none; font-size: 24px; font-weight: bold;
     }
-
-    /* Мобильная адаптация для карточек */
-    .result-card { margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid #eee; }
-    .result-title { font-size: 18px; color: #1a0dab; text-decoration: none; font-weight: 500; }
-    .result-url { color: #006621; font-size: 12px; display: block; word-break: break-all; }
     
-    /* Карточка ответа ИИ */
     .alice-card { 
-        background: #fdfdff; padding: 20px; border-radius: 15px; 
-        box-shadow: 0 4px 15px rgba(0,0,0,0.05); border-left: 5px solid #8e44ad; margin: 15px 0;
-        font-size: 16px; line-height: 1.5;
+        background: #fdfdff; padding: 25px; border-radius: 22px; 
+        box-shadow: 0 10px 40px rgba(0,0,0,0.05); border-left: 6px solid #8e44ad; margin-top: 15px; 
+        line-height: 1.6; font-size: 18px;
     }
-
-    /* Галерея картинок */
-    .image-box { border: 1px solid #eee; border-radius: 12px; padding: 8px; margin-bottom: 15px; height: 100%; }
-    .image-title { font-size: 13px; font-weight: 600; margin-top: 5px; color: #333; height: 40px; overflow: hidden; }
-    .image-source { font-size: 11px; color: #006621; text-decoration: none; }
-
-    @media (max-width: 640px) {
-        .logo { font-size: 26px; }
-        .stButton > button { height: 45px; font-size: 18px; }
-    }
+    
+    .img-box { border: 1px solid #eee; border-radius: 12px; padding: 5px; text-align: center; background: #fff; height: 100%; }
     </style>
     """, unsafe_allow_html=True)
 
-# 3. ИНИЦИАЛИЗАЦИЯ ПАМЯТИ
-if 'search_results' not in st.session_state: st.session_state.search_results = None
-if 'img_results' not in st.session_state: st.session_state.img_results = None
-if 'link_limit' not in st.session_state: st.session_state.link_limit = 5
-if 'img_limit' not in st.session_state: st.session_state.img_limit = 10
-if 'chat_history' not in st.session_state: st.session_state.chat_history = []
+# 2. ПАМЯТЬ
+if 'res' not in st.session_state: st.session_state.res = None
+if 'history' not in st.session_state: st.session_state.history = []
+if 'limits' not in st.session_state: st.session_state.limits = {"links": 3, "imgs": 8, "vids": 4}
+if 'view_img_idx' not in st.session_state: st.session_state.view_img_idx = None
 
-# 4. ФУНКЦИИ (ДАННЫЕ И API)
+# 3. ФУНКЦИИ
 @st.cache_data(ttl=600)
-def get_header_info():
+def get_header_data():
     try:
         tz_m, tz_k = pytz.timezone('Europe/Moscow'), pytz.timezone('Asia/Almaty')
-        w = requests.get("https://wttr.in/Moscow?format=%t", timeout=3).text.strip()
-        c = requests.get("https://open.er-api.com/v6/latest/USD", timeout=3).json()
-        usd = round(c['rates']['RUB'], 1)
-        eur = round(usd / (c['rates']['EUR'] / c['rates']['USD']), 1)
-        return datetime.now(tz_m).strftime("%d.%m"), datetime.now(tz_m).strftime("%H:%M"), datetime.now(tz_k).strftime("%H:%M"), w, usd, eur
-    except: return "??", "??", "??", "?", "??", "??"
+        now = datetime.now(tz_m)
+        w_m = requests.get("https://wttr.in/Moscow?format=%t", timeout=2).text.strip()
+        w_s = requests.get("https://wttr.in/Saint-Petersburg?format=%t", timeout=2).text.strip()
+        curr = requests.get("https://open.er-api.com/v6/latest/USD", timeout=2).json()
+        usd = round(curr['rates']['RUB'], 2)
+        eur = round(usd / (curr['rates']['EUR'] / curr['rates']['USD']), 2)
+        return now.strftime("%d.%m"), now.strftime("%H:%M"), datetime.now(tz_k).strftime("%H:%M"), w_m, w_s, usd, eur
+    except: return "??", "??", "??", "?", "?", "??", "??"
 
 def get_ai_res(msgs):
     try:
         auth = st.secrets["GIGACHAT_CREDENTIALS"]
-        tk_res = requests.post("https://ngw.devices.sberbank.ru:9443/api/v2/oauth", 
-                             headers={'Authorization': f'Basic {auth}', 'RqUID': str(uuid.uuid4()), 'Content-Type': 'application/x-www-form-urlencoded'},
-                             data={'scope': 'GIGACHAT_API_PERS'}, verify=False, timeout=10)
-        if tk_res.status_code == 401: return "ERROR_AUTH_GIGA"
-        token = tk_res.json()['access_token']
-        chat_res = requests.post("https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
-                               headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
-                               json={"model": "GigaChat", "messages": msgs, "temperature": 0.7}, verify=False, timeout=20)
-        return chat_res.json()['choices'][0]['message']['content']
-    except: return "Ошибка связи с ИИ"
+        tk_r = requests.post("https://ngw.devices.sberbank.ru:9443/api/v2/oauth", 
+                           headers={'Authorization': f'Basic {auth}', 'RqUID': str(uuid.uuid4()), 'Content-Type': 'application/x-www-form-urlencoded'},
+                           data={'scope': 'GIGACHAT_API_PERS'}, verify=False, timeout=10).json()
+        token = tk_r['access_token']
+        chat_r = requests.post("https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
+                             headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
+                             json={"model": "GigaChat", "messages": msgs, "temperature": 0.7}, verify=False, timeout=20).json()
+        return chat_r['choices'][0]['message']['content']
+    except: return "Ошибка ассистента."
+
+# --- ГОЛОСОВОЙ ВВОД (JS Компонент) ---
+def voice_input():
+    components.html("""
+        <script>
+        const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+        recognition.lang = 'ru-RU';
+        recognition.onresult = (event) => {
+            const text = event.results[0][0].transcript;
+            window.parent.postMessage({type: 'streamlit:set_widget_value', key: 'main_search', value: text}, '*');
+            const btn = window.parent.document.querySelector('button[kind="primary"]');
+            if(btn) btn.click();
+        };
+        window.parent.document.addEventListener('voice_start', () => recognition.start());
+        </script>
+    """, height=0)
 
 # --- ШАПКА ---
-d, tm, tk, w, u, e = get_header_info()
-st.markdown(f'<div class="logo">КУСИЦА</div>', unsafe_allow_html=True)
-st.markdown(f"""
+d, tm, tk, wm, ws, usd_r, eur_r = get_header_data()
+col_logo, col_info = st.columns([1, 4])
+with col_logo: st.markdown('<div class="logo">КУСИЦА</div>', unsafe_allow_html=True)
+with col_info:
+    st.markdown(f"""
     <div class="informer-box">
-        <div class="informer-item">📅 {d}</div><div class="informer-item">🕒 МСК {tm}</div>
-        <div class="informer-item">🇰🇿 КЗ {tk}</div><div class="informer-item">🌡️ {w}</div>
-        <div class="informer-item currency-pill">USD {u}₽</div><div class="informer-item currency-pill">EUR {e}₽</div>
+        <div class="informer-pill">📅 {d}</div><div class="informer-pill">🕒 МСК {tm}</div>
+        <div class="informer-pill">🇰🇿 КЗ {tk}</div><div class="informer-pill">🌡️ МСК {wm}</div>
+        <div class="informer-pill">🌡️ СПБ {ws}</div>
+        <div class="currency-red">USD {usd_r}₽</div><div class="currency-red">EUR {eur_r}₽</div>
     </div>
     """, unsafe_allow_html=True)
 
 # --- ПОИСК ---
-query = st.text_input("", placeholder="Найдётся всё...", key="main_search", label_visibility="collapsed")
-if st.button("Найти ответ ➔") or (query and st.session_state.get('last_q') != query):
-    if query:
+col_q, col_mic, col_b = st.columns([7, 0.5, 1])
+with col_q: 
+    q = st.text_input("", placeholder="Найдётся всё...", key="main_search", label_visibility="collapsed")
+with col_mic:
+    if st.button("🎙️"):
+        st.write('<script>window.parent.document.dispatchEvent(new Event("voice_start"));</script>', unsafe_allow_html=True)
+        voice_input()
+with col_b: btn = st.button("➔")
+
+# --- ЛОГИКА КОНВЕРТЕРА ВАЛЮТ ---
+def check_currency_conversion(query, usd_val, eur_val):
+    q = query.lower()
+    match = re.search(r'(\d+)\s*(доллар|usd|бакс)', q)
+    if match:
+        amount = int(match.group(1))
+        res = round(amount * usd_val, 2)
+        return f"{amount} USD", f"{res} ₽"
+    match_eur = re.search(r'(\d+)\s*(евро|eur)', q)
+    if match_eur:
+        amount = int(match_eur.group(1))
+        res = round(amount * eur_val, 2)
+        return f"{amount} EUR", f"{res} ₽"
+    return None
+
+# --- ИСТОРИЯ В САЙДБАРЕ ---
+with st.sidebar:
+    st.title("📜 История")
+    for h in reversed(st.session_state.history[-5:]):
+        st.button(f"🔍 {h}", key=f"h_{h}", on_click=lambda h=h: setattr(st.session_state, 'query_from_history', h))
+
+# --- ЛОГИКА ПОИСКА ---
+if (btn or q) and q:
+    if st.session_state.get('last_q') != q:
         with st.spinner(" "):
             try:
                 s_key = st.secrets["SERPER_API_KEY"]
-                headers = {'X-API-KEY': s_key, 'Content-Type': 'application/json'}
-                # Текст
-                r_text = requests.post("https://google.serper.dev/search", headers=headers, json={"q": query, "hl": "ru", "gl": "ru"}, timeout=10)
-                if r_text.status_code == 401: st.error("Ошибка: Неверный SERPER_API_KEY"); st.stop()
-                # Картинки
-                r_img = requests.post("https://google.serper.dev/images", headers=headers, json={"q": query}, timeout=10)
+                sr = requests.post("https://google.serper.dev/search", headers={'X-API-KEY': s_key}, json={"q": q, "hl": "ru"}).json()
+                ir = requests.post("https://google.serper.dev/images", headers={'X-API-KEY': s_key}, json={"q": q}).json()
+                vr = requests.post("https://google.serper.dev/videos", headers={'X-API-KEY': s_key}, json={"q": q}).json()
                 
-                st.session_state.search_results = r_text.json().get('organic', [])
-                st.session_state.img_results = r_img.json().get('images', [])
-                st.session_state.last_q = query
-                
-                # Первый ответ ИИ
-                ctx = "\n".join([l.get('snippet','') for l in st.session_state.search_results[:3]])
-                ans = get_ai_res([{"role":"user", "content": f"Вопрос: {query}\nИнформация: {ctx}"}])
-                if ans == "ERROR_AUTH_GIGA": st.error("Ошибка: Неверный GIGACHAT_CREDENTIALS"); st.stop()
-                st.session_state.chat_history = [{"role": "assistant", "content": ans}]
-            except Exception as ex: st.error(f"Сбой: {ex}")
+                links = sr.get('organic', [])
+                ans = get_ai_res([
+                    {"role": "system", "content": "Ты — Кусица, эрудированный ассистент Яндекса. Отвечай подробно и интересно."},
+                    {"role": "user", "content": f"Запрос: {q}\nДанные: {links[:5]}"}
+                ])
+                st.session_state.res = {"ans": ans, "links": links, "imgs": ir.get('images', []), "vids": vr.get('videos', []), "q": q, "suggest": sr.get('peopleAlsoAsk', [])}
+                if q not in st.session_state.history: st.session_state.history.append(q)
+                st.session_state.last_q = q
+            except: st.error("Ошибка поиска")
 
-# --- РЕЗУЛЬТАТЫ ---
-if st.session_state.search_results:
-    tab1, tab2 = st.tabs(["🔍 Поиск", "🖼️ Картинки"])
+# --- ВЫВОД РЕЗУЛЬТАТОВ ---
+if st.session_state.res:
+    # 1. Сначала проверяем Конвертер
+    conv = check_currency_conversion(st.session_state.res['q'], usd_r, eur_r)
+    if conv:
+        st.markdown(f"""<div class="converter-card"><div style="color:#888;">{conv[0]} по курсу КУСИЦЫ</div><div class="converter-value">{conv[1]}</div></div>""", unsafe_allow_html=True)
+
+    tab1, tab2, tab3 = st.tabs(["🔍 Поиск", "🖼️ Картинки", "📺 Видео"])
     
     with tab1:
-        # Карточка ответа ИИ
-        st.markdown(f'<div class="alice-card"><b>Кусица Ассистент:</b><br><br>{st.session_state.chat_history[0]["content"]}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="alice-card"><div style="color:#8e44ad; font-weight:bold; margin-bottom:10px;">🟣 КУСИЦА АССИСТЕНТ</div>{st.session_state.res["ans"]}</div>', unsafe_allow_html=True)
         
-        # Уточняющий вопрос
         with st.expander("💬 Уточнить у ассистента"):
-            u_q = st.text_input("Ваш вопрос...", key="chat_input")
-            if u_q:
-                with st.spinner(" "):
-                    new_ans = get_ai_res([{"role":"assistant", "content": st.session_state.chat_history[0]["content"]}, {"role":"user", "content": u_q}])
-                    st.write(f"**Ответ:** {new_ans}")
+            u_q = st.text_input("Ваш вопрос...")
+            if u_q: st.info(get_ai_res([{"role":"assistant", "content": st.session_state.res['ans']}, {"role":"user", "content": u_q}]))
 
         st.write("---")
-        # Список ссылок
-        for l in st.session_state.search_results[:st.session_state.link_limit]:
-            st.markdown(f"""
-            <div class="result-card">
-                <a class="result-title" href="{l['link']}" target="_blank">{l['title']}</a>
-                <span class="result-url">{l['link'][:70]}...</span>
-                <div style="font-size:14px; color:#444;">{l.get('snippet','')}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        if st.session_state.link_limit < len(st.session_state.search_results):
-            if st.button("Показать еще ссылки"):
-                st.session_state.link_limit += 10
-                st.rerun()
+        for l in st.session_state.res['links'][:st.session_state.limits['links']]:
+            st.markdown(f'<div style="margin-bottom:20px;"><a href="{l["link"]}" target="_blank" style="font-size:19px; color:#1a0dab; text-decoration:none;">{l["title"]}</a><br><small style="color:#006621;">{l["link"][:80]}...</small><div style="font-size:14px; color:#444;">{l.get("snippet","")}</div></div>', unsafe_allow_html=True)
+        if st.button("Показать еще ссылки"): st.session_state.limits['links'] += 5; st.rerun()
 
     with tab2:
-        imgs = st.session_state.img_results
-        if not imgs: st.write("Картинки не найдены")
+        imgs = st.session_state.res['imgs']
+        if st.session_state.view_img_idx is not None:
+            idx = st.session_state.view_img_idx
+            st.button("⬅️ Галерея", on_click=lambda: setattr(st.session_state, 'view_img_idx', None))
+            c1, c2, c3 = st.columns([1, 8, 1])
+            with c1: 
+                if idx > 0 and st.button("◀️"): st.session_state.view_img_idx -= 1; st.rerun()
+            with c2:
+                st.image(imgs[idx]['imageUrl'], use_container_width=True)
+                st.subheader(imgs[idx].get('title', ''))
+                st.link_button(f"Источник: {imgs[idx].get('source', 'Сайт')}", imgs[idx]['link'])
+            with c3:
+                if idx < len(imgs)-1 and st.button("▶️"): st.session_state.view_img_idx += 1; st.rerun()
         else:
-            cols = st.columns(2 if st.session_state.get('mobile', False) else 4) # Адаптация колонок
-            for i, img in enumerate(imgs[:st.session_state.img_limit]):
-                with cols[i % (2 if st.session_state.get('mobile', False) else 4)]:
-                    st.markdown(f"""
-                    <div class="image-box">
-                        <a href="{img['link']}" target="_blank">
-                            <img src="{img['imageUrl']}" style="width:100%; border-radius:8px; height:150px; object-fit:cover;">
-                        </a>
-                        <div class="image-title">{img['title'][:40]}...</div>
-                        <a class="image-source" href="{img['link']}" target="_blank">🔗 {img['source']}</a>
-                    </div>
-                    """, unsafe_allow_html=True)
-            
-            if st.session_state.img_limit < len(imgs):
-                if st.button("Загрузить еще картинки"):
-                    st.session_state.img_limit += 12
-                    st.rerun()
+            cols = st.columns(2)
+            for i, img in enumerate(imgs[:st.session_state.limits['imgs']]):
+                with cols[i % 2]:
+                    st.markdown(f'<div class="img-box"><img src="{img["imageUrl"]}" style="width:100%; border-radius:10px;"><br><small>{img.get("source","")}</small></div>', unsafe_allow_html=True)
+                    if st.button(f"Увеличить #{i+1}", key=f"img_z_{i}"): st.session_state.view_img_idx = i; st.rerun()
+            if st.button("Больше картинок"): st.session_state.limits['imgs'] += 10; st.rerun()
+
+    with tab3:
+        for v in st.session_state.res['vids'][:st.session_state.limits['vids']]:
+            col1, col2 = st.columns([1, 2])
+            with col1: st.image(v.get('imageUrl', ''))
+            with col2:
+                st.markdown(f"**{v['title']}**")
+                st.link_button("▶️ Смотреть", v['link'])
+        if st.button("Больше видео"): st.session_state.limits['vids'] += 4; st.rerun()
+
 else:
-    # НОВОСТИ НА ГЛАВНОЙ
+    # ГЛАВНАЯ (НОВОСТИ)
     st.write("---")
     st.subheader("Главное сегодня")
-    try:
-        n_res = requests.post("https://google.serper.dev/news", headers={'X-API-KEY': st.secrets["SERPER_API_KEY"]}, json={"q": "новости сегодня Россия", "hl": "ru"}, timeout=5).json()
-        for n in n_res.get('news', [])[:5]:
-            st.markdown(f"📰 [{n['title']}]({n['link']})")
-    except: st.write("Загрузка новостей...")
+    for n in fetch_news(st.secrets.get("SERPER_API_KEY", "")):
+        st.markdown(f"📰 [{n['title']}]({n['link']})")
 
-st.markdown("<br><hr><center style='color:#999; font-size:10px;'>КУСИЦА • 2024</center>", unsafe_allow_html=True)
+st.markdown("<br><hr><center style='color:#ccc; font-size:10px;'>КУСИЦА • 2024</center>", unsafe_allow_html=True)
