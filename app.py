@@ -19,6 +19,7 @@ st.markdown("""
     .stTextInput > div > div > input {
         font-size: 18px !important; padding: 18px 25px !important;
         border-radius: 25px !important; border: 2px solid #ffdb4d !important;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
     }
     .stButton > button {
         height: 55px; width: 100%; border-radius: 25px;
@@ -37,7 +38,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. Инициализация памяти (Session State)
+# 3. Инициализация памяти
 if 'res' not in st.session_state: st.session_state.res = None
 if 'link_limit' not in st.session_state: st.session_state.link_limit = 3
 if 'img_limit' not in st.session_state: st.session_state.img_limit = 4
@@ -64,19 +65,38 @@ def get_real_news(key):
         return r.get('news', [])[:5]
     except: return []
 
+# ИСПРАВЛЕННАЯ ФУНКЦИЯ ДЛЯ GIGACHAT
 def get_ai_answer(msgs):
     try:
+        if "GIGACHAT_CREDENTIALS" not in st.secrets:
+            return "Ошибка: Ключ GIGACHAT_CREDENTIALS не найден в Secrets."
+            
         auth = st.secrets["GIGACHAT_CREDENTIALS"]
+        
+        # 1. Получаем токен
         auth_res = requests.post("https://ngw.devices.sberbank.ru:9443/api/v2/oauth", 
                                headers={'Authorization': f'Basic {auth}', 'RqUID': str(uuid.uuid4()), 'Content-Type': 'application/x-www-form-urlencoded'},
                                data={'scope': 'GIGACHAT_API_PERS'}, verify=False, timeout=10)
-        token = auth_res.json()['access_token']
+        
+        if auth_res.status_code != 200:
+            return f"Ошибка авторизации Сбера (код {auth_res.status_code}): {auth_res.text}"
+            
+        token = auth_res.json().get('access_token')
+        
+        # 2. Запрос к чату
         chat_res = requests.post("https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
                                headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
                                json={"model": "GigaChat", "messages": msgs, "temperature": 0.7}, verify=False, timeout=20)
-        return chat_res.json()['choices'][0]['message']['content']
+        
+        result_json = chat_res.json()
+        
+        if chat_res.status_code == 200 and 'choices' in result_json:
+            return result_json['choices'][0]['message']['content']
+        else:
+            return f"Сбер вернул ошибку: {result_json.get('message', 'Неизвестная ошибка')}"
+            
     except Exception as e:
-        return f"Ошибка ассистента: {str(e)}"
+        return f"Техническая ошибка связи с ИИ: {str(e)}"
 
 # --- ШАПКА ---
 d, tm, tk, wm, ws, usd_r, eur_r = get_top_data()
@@ -94,7 +114,7 @@ with col_info:
 
 # --- ПОИСК ---
 col_q, col_b = st.columns([7, 1])
-with col_q: q = st.text_input("", placeholder="Найдётся всё...", label_visibility="collapsed")
+with col_q: q = st.text_input("", placeholder="Найдётся всё...", key="search_input", label_visibility="collapsed")
 with col_b: btn = st.button("➔")
 
 if (btn or q) and q:
@@ -149,22 +169,27 @@ if st.session_state.res:
                         st.session_state.view_img_idx += 1
                         st.rerun()
         else:
-            cols = st.columns(2)
-            for i, img in enumerate(imgs[:st.session_state.img_limit]):
-                with cols[i % 2]:
-                    st.image(img['imageUrl'])
-                    if st.button(f"Увеличить #{i+1}", key=f"btn_{i}"):
-                        st.session_state.view_img_idx = i
+            if not imgs:
+                st.write("Картинки не найдены")
+            else:
+                cols = st.columns(2)
+                for i, img in enumerate(imgs[:st.session_state.img_limit]):
+                    with cols[i % 2]:
+                        st.image(img['imageUrl'])
+                        if st.button(f"Увеличить #{i+1}", key=f"btn_img_{i}"):
+                            st.session_state.view_img_idx = i
+                            st.rerun()
+                
+                if st.session_state.img_limit < len(imgs):
+                    if st.button("Показать еще картинки"):
+                        st.session_state.img_limit += 6
                         st.rerun()
-            
-            if st.session_state.img_limit < len(imgs):
-                if st.button("Показать еще картинки"):
-                    st.session_state.img_limit += 6
-                    st.rerun()
 else:
     st.write("---")
     st.subheader("Главное сегодня")
-    for n in get_real_news(st.secrets.get("SERPER_API_KEY", "")):
-        st.markdown(f'<div class="news-item"><a href="{n["link"]}" target="_blank">{n["title"]}</a><br><small>{n.get("source","")} • {n.get("date","")}</small></div>', unsafe_allow_html=True)
+    news_key = st.secrets.get("SERPER_API_KEY")
+    if news_key:
+        for n in get_real_news(news_key):
+            st.markdown(f'<div class="news-item"><a href="{n["link"]}" target="_blank">{n["title"]}</a><br><small>{n.get("source","")} • {n.get("date","")}</small></div>', unsafe_allow_html=True)
 
 st.markdown("<br><hr><center style='color:#999; font-size:11px;'>КУСИЦА • 2024</center>", unsafe_allow_html=True)
