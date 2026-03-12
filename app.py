@@ -5,137 +5,175 @@ from datetime import datetime
 import pytz
 
 # 1. Настройка страницы
-st.set_page_config(page_title="Super AI Search", page_icon="🌐", layout="wide")
+st.set_page_config(page_title="КУСИЦА ПОИСК", page_icon="🔍", layout="wide")
 
-# 2. Стили CSS (включая красную рамку для валют)
+# 2. Улучшенный CSS стиль (Яндекс-стайл)
 st.markdown("""
     <style>
-    .main { background-color: #f0f2f6; }
-    .currency-container {
-        border: 2px solid #ff4b4b;
-        padding: 15px;
-        border-radius: 10px;
-        background-color: #fff5f5;
-        text-align: center;
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
     }
-    .time-container {
-        font-size: 18px;
-        font-weight: bold;
-        color: #1f1f1f;
-        padding: 10px;
-        background: #e1e4e8;
-        border-radius: 10px;
+
+    /* Логотип КУСИЦА */
+    .logo {
+        font-size: 32px;
+        font-weight: 800;
+        color: #000;
+        letter-spacing: -1.5px;
         margin-bottom: 20px;
     }
-    .weather-card {
-        padding: 10px;
-        background: white;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    
+    /* Компактные иконки информеры */
+    .informer-box {
+        display: flex;
+        gap: 20px;
+        font-size: 14px;
+        color: #555;
+        margin-bottom: 30px;
     }
-    .stTextInput > div > div > input { border-radius: 20px; }
+    
+    .informer-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+
+    /* Красная рамка для валют (как просили) */
+    .currency-red-box {
+        border: 1px solid #ff4b4b;
+        padding: 2px 8px;
+        border-radius: 5px;
+        color: #ff4b4b;
+        font-weight: bold;
+    }
+
+    /* Стилизация большой поисковой строки */
+    .stTextInput > div > div > input {
+        font-size: 20px !important;
+        padding: 25px 20px !important;
+        border-radius: 15px !important;
+        border: 2px solid #e2e2e2 !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+    
+    /* Кнопка-стрелочка */
+    .stButton > button {
+        height: 60px;
+        width: 100%;
+        border-radius: 15px;
+        background-color: #fc3f1d; /* Фирменный красный */
+        color: white;
+        border: none;
+        font-size: 24px;
+    }
+    
+    .answer-card {
+        background: white;
+        padding: 30px;
+        border-radius: 20px;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+        border: 1px solid #f0f0f0;
+        margin-top: 30px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# 3. Функции данных
-def get_time():
-    moscow = datetime.now(pytz.timezone('Europe/Moscow')).strftime("%H:%M")
-    kazakhstan = datetime.now(pytz.timezone('Asia/Almaty')).strftime("%H:%M")
-    return moscow, kazakhstan
-
-def get_currency():
+# 3. Вспомогательные функции
+def get_data():
+    # Время
+    msk_time = datetime.now(pytz.timezone('Europe/Moscow')).strftime("%H:%M")
+    kz_time = datetime.now(pytz.timezone('Asia/Almaty')).strftime("%H:%M")
+    
+    # Погода (Цельсий)
     try:
-        # Используем бесплатное API курсов
-        res = httpx.get("https://open.er-api.com/v6/latest/USD").json()
-        usd_rub = res['rates']['RUB']
-        eur_rub = usd_rub / (res['rates']['EUR'] / res['rates']['USD'])
-        return f"USD: {usd_rub:.2f} ₽ | EUR: {eur_rub:.2f} ₽"
+        w_msk = httpx.get("https://wttr.in/Moscow?format=%t").text.strip()
+        w_spb = httpx.get("https://wttr.in/Saint-Petersburg?format=%t").text.strip()
     except:
-        return "Курс временно недоступен"
-
-def get_weather(city):
+        w_msk, w_spb = "?°C", "?°C"
+        
+    # Валюта
     try:
-        # Простой сервис погоды без ключа
-        res = httpx.get(f"https://wttr.in/{city}?format=%c%t").text
-        return res
+        curr = httpx.get("https://open.er-api.com/v6/latest/USD").json()
+        usd = round(curr['rates']['RUB'], 1)
+        eur = round(usd / (curr['rates']['EUR'] / curr['rates']['USD']), 1)
     except:
-        return "Нет данных"
+        usd, eur = "??", "??"
+        
+    return moscow_time, kz_time, w_msk, w_spb, usd, eur
 
-# 4. Проверка ключей
-try:
-    SERPER_KEY = st.secrets["SERPER_API_KEY"]
-    GEMINI_KEY = st.secrets["GEMINI_API_KEY"]
-    genai.configure(api_key=GEMINI_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
-except Exception:
-    st.error("Настройте ключи SERPER_API_KEY и GEMINI_API_KEY в Secrets!")
-    st.stop()
+moscow_time, kazakh_time, weather_msk, weather_spb, usd_rate, eur_rate = get_data()
 
-# 5. Поисковые функции
-def search_internet(query):
-    url = "https://google.serper.dev/search"
-    headers = {'X-API-KEY': SERPER_KEY, 'Content-Type': 'application/json'}
-    payload = {"q": query, "hl": "ru"}
-    with httpx.Client() as client:
-        response = client.post(url, headers=headers, json=payload, timeout=15)
-        results = response.json()
-    return "\n\n".join([f"{r.get('title')}: {r.get('snippet')}" for r in results.get("organic", [])[:5]])
+# 4. ВЕРХНЯЯ ЧАСТЬ (Лого и Информеры)
+col_logo, col_info = st.columns([1, 4])
 
-# --- ВЕРХНЯЯ ПАНЕЛЬ (ВРЕМЯ) ---
-msk, kz = get_time()
-st.markdown(f"""
-    <div class="time-container">
-        🕒 Москва: {msk} | 🇰🇿 Казахстан (Астана): {kz}
+with col_logo:
+    st.markdown('<div class="logo">КУСИЦА</div>', unsafe_allow_html=True)
+
+with col_info:
+    st.markdown(f"""
+    <div class="informer-box">
+        <div class="informer-item">🕒 МСК {moscow_time}</div>
+        <div class="informer-item">🇰🇿 КЗ {kazakh_time}</div>
+        <div class="informer-item">☁️ МСК {weather_msk}</div>
+        <div class="informer-item">☁️ СПБ {weather_spb}</div>
+        <div class="informer-item currency-red-box">USD {usd_rate}₽</div>
+        <div class="informer-item currency-red-box">EUR {eur_rate}₽</div>
     </div>
     """, unsafe_allow_html=True)
 
-# --- ГЛАВНЫЙ ИНТЕРФЕЙС (КОЛОНКИ) ---
-col1, col2, col3 = st.columns([1, 2, 1])
+# 5. ЦЕНТРАЛЬНАЯ ЧАСТЬ (Поиск)
+st.write("") # Отступ
+st.write("") 
 
-with col1:
-    st.markdown("### 🌤 Погода")
-    st.markdown(f"<div class='weather-card'><b>МСК:</b> {get_weather('Moscow')}</div>", unsafe_allow_html=True)
-    st.write("")
-    st.markdown(f"<div class='weather-card'><b>СПБ:</b> {get_weather('Saint-Petersburg')}</div>", unsafe_allow_html=True)
+col_search, col_btn = st.columns([6, 1])
 
-with col2:
-    st.title("🚀 Smart Search AI")
-    query = st.text_input("", placeholder="Спроси меня о чем угодно...")
-    search_button = st.button("Найти ответ")
+with col_search:
+    query = st.text_input("", placeholder="Найти в интернете...", label_visibility="collapsed")
 
-with col3:
-    st.markdown("### 💸 Валюта")
-    st.markdown(f"""
-        <div class="currency-container">
-            <b>Курс ЦБ (прим.)</b><br>
-            {get_currency()}
-        </div>
-        """, unsafe_allow_html=True)
+with col_btn:
+    search_clicked = st.button("➔")
 
-# --- ЛОГИКА ПОИСКА ---
-if search_button and query:
-    with st.spinner("Ищу по всему интернету..."):
-        try:
-            context = search_internet(query)
-            prompt = f"Ты современный поисковик. Дай четкий и короткий ответ на вопрос: {query}. Используй данные: {context}"
-            response = model.generate_content(prompt)
-            
-            st.markdown("---")
-            st.subheader("💡 Мой ответ:")
-            st.success(response.text)
-            
-            with st.expander("🔗 Источники информации"):
-                st.write(context)
-        except Exception as e:
-            st.error(f"Ошибка: {e}")
-
-# --- ФИШКА ОТ СЕБЯ (ИНТЕРЕСНЫЙ ФАКТ) ---
-st.markdown("---")
-if not query:
+# 6. ЛОГИКА ИИ И ВЫВОД
+if (search_clicked or query != "") and query:
+    # Проверка ключей
     try:
-        # Генерируем случайный факт при загрузке
-        fact_prompt = "Расскажи один очень короткий и удивительный научный факт на русском языке."
-        random_fact = model.generate_content(fact_prompt).text
-        st.info(f"<b>💡 Знаете ли вы?</b><br>{random_fact}", icon="🎓")
-    except:
-        pass
+        SERPER_KEY = st.secrets["SERPER_API_KEY"]
+        GEMINI_KEY = st.secrets["GEMINI_API_KEY"]
+        genai.configure(api_key=GEMINI_KEY)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        with st.spinner(" "):
+            # Поиск
+            url = "https://google.serper.dev/search"
+            headers = {'X-API-KEY': SERPER_KEY, 'Content-Type': 'application/json'}
+            payload = {"q": query, "hl": "ru"}
+            
+            with httpx.Client() as client:
+                res = client.post(url, headers=headers, json=payload, timeout=15).json()
+                context = "\n".join([r.get('snippet', '') for r in res.get('organic', [])[:5]])
+            
+            # Ответ
+            prompt = f"Вопрос: {query}. Данные интернета: {context}. Ответь кратко и понятно."
+            answer = model.generate_content(prompt).text
+            
+            st.markdown(f"""
+            <div class="answer-card">
+                <div style="color: #888; font-size: 14px; margin-bottom: 10px;">ОТВЕТ ИИ</div>
+                <div style="font-size: 18px; color: #111;">{answer}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            with st.expander("Источники"):
+                st.write(context)
+                
+    except Exception as e:
+        st.error(f"Ошибка: {e}. Проверьте ключи в Secrets.")
+
+# 7. ФИШКА: СОВЕТ ДНЯ (внизу)
+st.write("")
+st.write("")
+st.write("")
+st.markdown("---")
+st.markdown(f"<div style='color: #999; text-align: center; font-size: 13px;'>Кусица Поиск 2024 • Сделано для тебя</div>", unsafe_allow_html=True)
