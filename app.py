@@ -5,154 +5,171 @@ import pytz
 import uuid
 
 # 1. Настройка страницы
-st.set_page_config(page_title="КУСИЦА ПОИСК", page_icon="🔍", layout="wide")
+st.set_page_config(page_title="КУСИЦА", page_icon="🔍", layout="wide")
 
-# 2. Яндекс-стайл CSS
+# 2. Адаптивный CSS (для ПК и Телефонов)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-    .logo { font-size: 42px; font-weight: 900; color: #000; letter-spacing: -2px; text-decoration: none; }
-    .informer-box { display: flex; flex-wrap: wrap; gap: 15px; font-size: 14px; color: #555; margin-top: 5px; }
-    .informer-item { display: flex; align-items: center; gap: 5px; background: #f5f5f7; padding: 4px 10px; border-radius: 8px; }
-    .currency-red-box { border: 1px solid #ff4b4b; background: #fff5f5; color: #ff4b4b; font-weight: bold; }
     
-    /* Стилизация поиска */
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #fff; }
+
+    /* Логотип адаптивный */
+    .logo { 
+        font-size: 36px; font-weight: 900; color: #000; 
+        letter-spacing: -2px; margin-bottom: 10px;
+    }
+
+    /* Информеры: на мобилках в ряд с переносом */
+    .informer-box { 
+        display: flex; flex-wrap: wrap; gap: 8px; 
+        font-size: 12px; color: #555; margin-bottom: 20px; 
+    }
+    .informer-item { 
+        background: #f0f0f2; padding: 4px 8px; border-radius: 6px; 
+        white-space: nowrap; 
+    }
+    .currency-red { 
+        border: 1px solid #ff4b4b; background: #fff5f5; color: #ff4b4b; font-weight: bold; 
+    }
+
+    /* Поисковая строка для мобилок */
     .stTextInput > div > div > input {
-        font-size: 20px !important; padding: 25px 20px !important;
+        font-size: 18px !important; padding: 15px !important;
         border-radius: 12px !important; border: 2px solid #ffdb4d !important;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.07);
-    }
-    .stButton > button {
-        height: 64px; width: 100%; border-radius: 12px;
-        background-color: #ffdb4d; color: black; border: none; font-size: 28px; font-weight: bold;
     }
     
-    /* Карточки результатов */
-    .answer-card { background: #fff; padding: 30px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); border: 1px solid #eee; margin-top: 20px; }
-    .source-link { color: #1a0dab; text-decoration: none; font-weight: bold; font-size: 18px; }
-    .source-link:hover { text-decoration: underline; }
-    .source-snippet { color: #4d5156; font-size: 14px; margin-bottom: 15px; }
+    /* Кнопка поиска */
+    .stButton > button {
+        height: 55px; width: 100%; border-radius: 12px;
+        background-color: #ffdb4d; color: black; border: none; font-size: 22px;
+    }
+
+    /* Карточка ответа */
+    .answer-card { 
+        background: #fff; padding: 20px; border-radius: 15px; 
+        box-shadow: 0 5px 20px rgba(0,0,0,0.05); border: 1px solid #eee; margin-top: 15px; 
+    }
+
+    /* Ссылки */
+    .source-item { margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #f9f9f9; }
+    .source-link { color: #1a0dab; text-decoration: none; font-weight: bold; font-size: 16px; display: block; }
+    .source-snippet { color: #4d5156; font-size: 13px; line-height: 1.4; }
+    
+    /* Убираем лишние отступы Streamlit на мобилках */
+    @media (max-width: 640px) {
+        .logo { font-size: 28px; text-align: center; }
+        .informer-box { justify-content: center; }
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# 3. Инициализация сессии (чтобы хранить контекст)
-if 'history' not in st.session_state:
-    st.session_state.history = []
-if 'context' not in st.session_state:
-    st.session_state.context = ""
+# 3. Инициализация сессии
+if 'show_more' not in st.session_state: st.session_state.show_more = False
+if 'history' not in st.session_state: st.session_state.history = []
 
-# 4. Функции для данных
-def get_data():
-    m_t = datetime.now(pytz.timezone('Europe/Moscow')).strftime("%H:%M")
-    k_t = datetime.now(pytz.timezone('Asia/Almaty')).strftime("%H:%M")
+# 4. Данные (Время, Погода, Валюта)
+@st.cache_data(ttl=600)
+def get_header_data():
+    tz_m = datetime.now(pytz.timezone('Europe/Moscow')).strftime("%H:%M")
+    tz_k = datetime.now(pytz.timezone('Asia/Almaty')).strftime("%H:%M")
     try:
-        w_m = httpx.get("https://wttr.in/Moscow?format=%t", timeout=5).text.strip()
-        w_s = httpx.get("https://wttr.in/Saint-Petersburg?format=%t", timeout=5).text.strip()
+        w_m = httpx.get("https://wttr.in/Moscow?format=%t", timeout=3).text.strip()
+        w_s = httpx.get("https://wttr.in/Saint-Petersburg?format=%t", timeout=3).text.strip()
     except: w_m, w_s = "?°C", "?°C"
     try:
-        curr = httpx.get("https://open.er-api.com/v6/latest/USD", timeout=5).json()
+        curr = httpx.get("https://open.er-api.com/v6/latest/USD", timeout=3).json()
         usd = round(curr['rates']['RUB'], 1)
         eur = round(usd / (curr['rates']['EUR'] / curr['rates']['USD']), 1)
     except: usd, eur = "??", "??"
-    return m_t, k_t, w_m, w_s, usd, eur
+    return tz_m, tz_k, w_m, w_s, usd, eur
 
-m_t, k_t, m_w, s_w, usd_r, eur_r = get_data()
+t_m, t_k, w_m, w_s, u_r, e_r = get_header_data()
 
-# 5. Шапка (Лого + Информеры)
-col_l, col_i = st.columns([1, 4])
-with col_l: st.markdown('<div class="logo">КУСИЦА</div>', unsafe_allow_html=True)
-with col_i:
-    st.markdown(f"""
+# 5. Шапка
+st.markdown('<div class="logo">КУСИЦА</div>', unsafe_allow_html=True)
+st.markdown(f"""
     <div class="informer-box">
-        <div class="informer-item">🕒 МСК <b>{m_t}</b></div>
-        <div class="informer-item">🇰🇿 КЗ <b>{k_t}</b></div>
-        <div class="informer-item">☁️ МСК <b>{m_w}</b></div>
-        <div class="informer-item">☁️ СПБ <b>{s_w}</b></div>
-        <div class="informer-item currency-red-box">USD {usd_r}₽</div>
-        <div class="informer-item currency-red-box">EUR {eur_r}₽</div>
+        <div class="informer-item">🕒 МСК {t_m}</div>
+        <div class="informer-item">🇰🇿 КЗ {t_k}</div>
+        <div class="informer-item">☁️ МСК {w_m}</div>
+        <div class="informer-item">☁️ СПБ {w_s}</div>
+        <div class="informer-item currency-red">USD {u_r}₽</div>
+        <div class="informer-item currency-red">EUR {e_r}₽</div>
     </div>
     """, unsafe_allow_html=True)
 
-# 6. Взаимодействие с GigaChat
-def get_gigachat_answer(messages):
-    auth_data = st.secrets["GIGACHAT_CREDENTIALS"]
-    rquid = str(uuid.uuid4())
-    with httpx.Client(verify=False) as client:
-        # Токен
-        token = client.post("https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
-            headers={"Authorization": f"Basic {auth_data}", "Content-Type": "application/x-www-form-urlencoded", "RqUID": rquid},
+# 6. Функции API
+def get_giga_answer(msgs):
+    auth = st.secrets["GIGACHAT_CREDENTIALS"]
+    uid = str(uuid.uuid4())
+    with httpx.Client(verify=False) as cl:
+        tk = cl.post("https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
+            headers={"Authorization": f"Basic {auth}", "Content-Type": "application/x-www-form-urlencoded", "RqUID": uid},
             data={"scope": "GIGACHAT_API_PERS"}).json()["access_token"]
-        # Чат
-        res = client.post("https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json={"model": "GigaChat", "messages": messages, "temperature": 0.7}).json()
-        return res["choices"][0]["message"]["content"]
+        rs = cl.post("https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
+            headers={"Authorization": f"Bearer {tk}", "Content-Type": "application/json"},
+            json={"model": "GigaChat", "messages": msgs, "temperature": 0.7}).json()
+        return rs["choices"][0]["message"]["content"]
 
-# 7. Главный Поиск
-st.write("")
-col_search, col_btn = st.columns([7, 1])
-with col_search:
-    query = st.text_input("", placeholder="Спроси Кусицу...", label_visibility="collapsed", key="main_search")
-with col_btn:
-    search_clicked = st.button("➔")
+# 7. Поиск
+col_query, col_go = st.columns([5, 1])
+with col_query:
+    q = st.text_input("", placeholder="Найти в Кусице...", label_visibility="collapsed")
+with col_go:
+    btn = st.button("➔")
 
-if (search_clicked or query) and query:
-    if 'last_query' not in st.session_state or st.session_state.last_query != query:
-        st.session_state.last_query = query
-        try:
-            with st.spinner(" "):
-                # Поиск через Serper
+if (btn or q) and q:
+    if 'last_q' not in st.session_state or st.session_state.last_q != q:
+        st.session_state.last_q = q
+        st.session_state.show_more = False # Сбрасываем кнопку при новом поиске
+        with st.spinner(" "):
+            try:
                 s_res = httpx.post("https://google.serper.dev/search",
                     headers={'X-API-KEY': st.secrets["SERPER_API_KEY"], 'Content-Type': 'application/json'},
-                    json={"q": query, "hl": "ru"}).json()
-                
+                    json={"q": q, "hl": "ru"}).json()
                 links = s_res.get('organic', [])
-                context = "\n".join([f"{r.get('title')}: {r.get('snippet')}" for r in links[:5]])
-                st.session_state.context = context
-                st.session_state.links = links[:5]
-                
-                # Запрос к нейросети
-                prompt = [{"role": "system", "content": "Ты поисковик Кусица. Отвечай кратко на основе данных."},
-                          {"role": "user", "content": f"Вопрос: {query}\nДанные из сети: {context}"}]
-                
-                answer = get_gigachat_answer(prompt)
-                st.session_state.history = [{"role": "assistant", "content": answer}]
-        except Exception as e:
-            st.error(f"Ошибка: {e}")
+                context = "\n".join([f"{l.get('title')}: {l.get('snippet')}" for l in links[:5]])
+                ans = get_giga_answer([{"role":"system","content":"Ты Кусица. Отвечай кратко."},
+                                       {"role":"user","content":f"Вопрос: {q}\nИнфо: {context}"}])
+                st.session_state.history = [{"ans": ans, "links": links, "ctx": context}]
+            except: st.error("Ошибка связи. Проверьте ключи.")
 
-# 8. Вывод результатов
+# 8. Вывод
 if st.session_state.history:
-    # Ответ ассистента
-    st.markdown(f"""
-    <div class="answer-card">
-        <div style="color: #ff4b4b; font-weight: bold; margin-bottom: 15px; font-size: 14px;">КУСИЦА АССИСТЕНТ</div>
-        <div style="font-size: 19px; line-height: 1.6;">{st.session_state.history[0]['content']}</div>
-    </div>
-    """, unsafe_allow_html=True)
+    res = st.session_state.history[0]
+    
+    # Ответ
+    st.markdown(f'<div class="answer-card"><b>КУСИЦА АССИСТЕНТ</b><br><br>{res["ans"]}</div>', unsafe_allow_html=True)
+    
+    # Уточнение
+    sub_q = st.text_input("Уточнить детали...", key="sub")
+    if sub_q:
+        with st.spinner(" "):
+            sub_ans = get_giga_answer([{"role":"system","content":f"Контекст: {res['ctx']}"},
+                                       {"role":"assistant","content":res['ans']},
+                                       {"role":"user","content":sub_q}])
+            st.info(sub_ans)
 
-    # Уточнение (Дополнительный вопрос)
-    st.write("")
-    follow_up = st.text_input("Уточнить у ассистента...", key="follow_up")
-    if follow_up:
-        with st.spinner("Уточняю..."):
-            messages = [
-                {"role": "system", "content": f"Ты Кусица. Предыдущий контекст поиска: {st.session_state.context}"},
-                {"role": "assistant", "content": st.session_state.history[0]['content']},
-                {"role": "user", "content": follow_up}
-            ]
-            new_answer = get_gigachat_answer(messages)
-            st.markdown(f"""<div class="answer-card" style="background: #f9f9f9;"><b>Уточнение:</b><br>{new_answer}</div>""", unsafe_allow_html=True)
-
-    # Ссылки (Источники)
-    st.write("")
-    st.subheader("🌐 Полезные ссылки")
-    for link in st.session_state.links:
+    # Ссылки
+    st.write("---")
+    st.subheader("🌐 Источники")
+    
+    # Сначала показываем 2 ссылки
+    visible_links = res["links"] if st.session_state.show_more else res["links"][:2]
+    
+    for l in visible_links:
         st.markdown(f"""
-        <div>
-            <a class="source-link" href="{link.get('link')}" target="_blank">{link.get('title')}</a>
-            <div class="source-snippet">{link.get('snippet')}</div>
+        <div class="source-item">
+            <a class="source-link" href="{l.get('link')}" target="_blank">{l.get('title')}</a>
+            <div class="source-snippet">{l.get('snippet')}</div>
         </div>
         """, unsafe_allow_html=True)
+    
+    # Кнопка Показать еще
+    if not st.session_state.show_more and len(res["links"]) > 2:
+        if st.button("Показать еще ссылки"):
+            st.session_state.show_more = True
+            st.rerun()
 
-st.markdown("<br><hr><center>КУСИЦА ПОИСК • 2024</center>", unsafe_allow_html=True)
+st.markdown("<br><center style='color:#ccc; font-size:10px;'>КУСИЦА ПОИСК 2024</center>", unsafe_allow_html=True)
