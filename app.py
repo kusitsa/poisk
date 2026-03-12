@@ -6,9 +6,10 @@ import re
 from datetime import datetime
 import streamlit.components.v1 as components
 
-# 1. КОНФИГУРАЦИЯ И СТИЛИ
+# 1. КОНФИГУРАЦИЯ СТРАНИЦЫ
 st.set_page_config(page_title="КУСИЦА — Супер Поиск", page_icon="🔍", layout="wide")
 
+# 2. АДАПТИВНЫЙ ДИЗАЙН (CSS)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap');
@@ -19,14 +20,6 @@ st.markdown("""
     .informer-pill { background: #f2f2f4; padding: 4px 10px; border-radius: 12px; display: flex; align-items: center; gap: 4px; color: #555; }
     .currency-red { border: 1px solid #ff4b4b; background: #fff5f5; color: #ff4b4b; font-weight: bold; padding: 2px 8px; border-radius: 10px; }
 
-    /* Конвертер Валют (Большая карточка) */
-    .converter-card {
-        background: linear-gradient(135deg, #fff 0%, #f9f9f9 100%);
-        padding: 30px; border-radius: 25px; border: 2px solid #ffdb4d;
-        margin: 20px 0; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.05);
-    }
-    .converter-value { font-size: 48px; font-weight: 900; color: #000; margin: 10px 0; }
-
     /* Поиск */
     .stTextInput > div > div > input {
         font-size: 18px !important; padding: 20px 25px !important;
@@ -36,24 +29,36 @@ st.markdown("""
         height: 56px; width: 100%; border-radius: 28px;
         background-color: #ffdb4d; color: black; border: none; font-size: 24px; font-weight: bold;
     }
-    
+
+    /* Карточка конвертера */
+    .converter-card {
+        background: #fff; padding: 25px; border-radius: 20px; border: 2px solid #ffdb4d;
+        text-align: center; margin: 15px 0; box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+    }
+    .converter-value { font-size: 42px; font-weight: 900; color: #000; }
+
+    /* Ассистент */
     .alice-card { 
         background: #fdfdff; padding: 25px; border-radius: 22px; 
         box-shadow: 0 10px 40px rgba(0,0,0,0.05); border-left: 6px solid #8e44ad; margin-top: 15px; 
         line-height: 1.6; font-size: 18px;
     }
-    
     .img-box { border: 1px solid #eee; border-radius: 12px; padding: 5px; text-align: center; background: #fff; height: 100%; }
+    
+    /* Ссылки */
+    .search-result { margin-bottom: 25px; }
+    .search-title { font-size: 20px; color: #1a0dab; text-decoration: none; font-weight: 500; }
+    .search-url { color: #006621; font-size: 13px; display: block; }
     </style>
     """, unsafe_allow_html=True)
 
-# 2. ПАМЯТЬ
+# 3. ИНИЦИАЛИЗАЦИЯ ПАМЯТИ
 if 'res' not in st.session_state: st.session_state.res = None
 if 'history' not in st.session_state: st.session_state.history = []
 if 'limits' not in st.session_state: st.session_state.limits = {"links": 3, "imgs": 8, "vids": 4}
 if 'view_img_idx' not in st.session_state: st.session_state.view_img_idx = None
 
-# 3. ФУНКЦИИ
+# 4. ВСЕ ФУНКЦИИ (API И ЛОГИКА)
 @st.cache_data(ttl=600)
 def get_header_data():
     try:
@@ -80,17 +85,30 @@ def get_ai_res(msgs):
         return chat_r['choices'][0]['message']['content']
     except: return "Ошибка ассистента."
 
-# --- ГОЛОСОВОЙ ВВОД (JS Компонент) ---
-def voice_input():
+def fetch_news(key):
+    try:
+        r = requests.post("https://google.serper.dev/news", headers={'X-API-KEY': key}, json={"q": "главные новости", "gl": "ru", "hl": "ru"}).json()
+        return r.get('news', [])[:5]
+    except: return []
+
+def check_currency_conversion(query, usd_val, eur_val):
+    q = query.lower()
+    match = re.search(r'(\d+)\s*(доллар|usd|бакс)', q)
+    if match: return f"{match.group(1)} USD", f"{round(int(match.group(1)) * usd_val, 2)} ₽"
+    match_eur = re.search(r'(\d+)\s*(евро|eur)', q)
+    if match_eur: return f"{match_eur.group(1)} EUR", f"{round(int(match_eur.group(1)) * eur_val, 2)} ₽"
+    return None
+
+def voice_input_js():
     components.html("""
         <script>
         const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
         recognition.lang = 'ru-RU';
         recognition.onresult = (event) => {
             const text = event.results[0][0].transcript;
-            window.parent.postMessage({type: 'streamlit:set_widget_value', key: 'main_search', value: text}, '*');
-            const btn = window.parent.document.querySelector('button[kind="primary"]');
-            if(btn) btn.click();
+            const input = window.parent.document.querySelector('input[data-testid="stTextInput"]');
+            input.value = text;
+            input.dispatchEvent(new Event('input', {bubbles:true}));
         };
         window.parent.document.addEventListener('voice_start', () => recognition.start());
         </script>
@@ -111,35 +129,18 @@ with col_info:
     """, unsafe_allow_html=True)
 
 # --- ПОИСК ---
+voice_input_js()
 col_q, col_mic, col_b = st.columns([7, 0.5, 1])
-with col_q: 
-    q = st.text_input("", placeholder="Найдётся всё...", key="main_search", label_visibility="collapsed")
-with col_mic:
-    if st.button("🎙️"):
-        st.write('<script>window.parent.document.dispatchEvent(new Event("voice_start"));</script>', unsafe_allow_html=True)
-        voice_input()
+with col_q: q = st.text_input("", placeholder="Спроси Кусицу...", key="main_search", label_visibility="collapsed")
+with col_mic: 
+    if st.button("🎙️"): st.write('<script>window.parent.document.dispatchEvent(new Event("voice_start"));</script>', unsafe_allow_html=True)
 with col_b: btn = st.button("➔")
 
-# --- ЛОГИКА КОНВЕРТЕРА ВАЛЮТ ---
-def check_currency_conversion(query, usd_val, eur_val):
-    q = query.lower()
-    match = re.search(r'(\d+)\s*(доллар|usd|бакс)', q)
-    if match:
-        amount = int(match.group(1))
-        res = round(amount * usd_val, 2)
-        return f"{amount} USD", f"{res} ₽"
-    match_eur = re.search(r'(\d+)\s*(евро|eur)', q)
-    if match_eur:
-        amount = int(match_eur.group(1))
-        res = round(amount * eur_val, 2)
-        return f"{amount} EUR", f"{res} ₽"
-    return None
-
-# --- ИСТОРИЯ В САЙДБАРЕ ---
+# --- САЙДБАР ---
 with st.sidebar:
     st.title("📜 История")
     for h in reversed(st.session_state.history[-5:]):
-        st.button(f"🔍 {h}", key=f"h_{h}", on_click=lambda h=h: setattr(st.session_state, 'query_from_history', h))
+        if st.button(f"🔍 {h}", key=f"hist_{h}"): q = h # Упрощенный повтор поиска
 
 # --- ЛОГИКА ПОИСКА ---
 if (btn or q) and q:
@@ -147,46 +148,36 @@ if (btn or q) and q:
         with st.spinner(" "):
             try:
                 s_key = st.secrets["SERPER_API_KEY"]
-                sr = requests.post("https://google.serper.dev/search", headers={'X-API-KEY': s_key}, json={"q": q, "hl": "ru"}).json()
-                ir = requests.post("https://google.serper.dev/images", headers={'X-API-KEY': s_key}, json={"q": q}).json()
-                vr = requests.post("https://google.serper.dev/videos", headers={'X-API-KEY': s_key}, json={"q": q}).json()
-                
+                h = {'X-API-KEY': s_key, 'Content-Type': 'application/json'}
+                sr = requests.post("https://google.serper.dev/search", headers=h, json={"q": q, "hl": "ru"}).json()
+                ir = requests.post("https://google.serper.dev/images", headers=h, json={"q": q}).json()
+                vr = requests.post("https://google.serper.dev/videos", headers=h, json={"q": q}).json()
                 links = sr.get('organic', [])
-                ans = get_ai_res([
-                    {"role": "system", "content": "Ты — Кусица, эрудированный ассистент Яндекса. Отвечай подробно и интересно."},
-                    {"role": "user", "content": f"Запрос: {q}\nДанные: {links[:5]}"}
-                ])
-                st.session_state.res = {"ans": ans, "links": links, "imgs": ir.get('images', []), "vids": vr.get('videos', []), "q": q, "suggest": sr.get('peopleAlsoAsk', [])}
+                ans = get_ai_res([{"role":"system","content":"Ты Кусица, эрудированный ассистент. Отвечай подробно."}, {"role":"user","content":f"Запрос: {q}\nИнфо: {links[:3]}"}])
+                st.session_state.res = {"ans": ans, "links": links, "imgs": ir.get('images', []), "vids": vr.get('videos', []), "q": q}
                 if q not in st.session_state.history: st.session_state.history.append(q)
                 st.session_state.last_q = q
-            except: st.error("Ошибка поиска")
+            except: st.error("Ошибка сети")
 
 # --- ВЫВОД РЕЗУЛЬТАТОВ ---
 if st.session_state.res:
-    # 1. Сначала проверяем Конвертер
+    # Конвертер
     conv = check_currency_conversion(st.session_state.res['q'], usd_r, eur_r)
-    if conv:
-        st.markdown(f"""<div class="converter-card"><div style="color:#888;">{conv[0]} по курсу КУСИЦЫ</div><div class="converter-value">{conv[1]}</div></div>""", unsafe_allow_html=True)
+    if conv: st.markdown(f'<div class="converter-card"><div style="color:#888;">{conv[0]}</div><div class="converter-value">{conv[1]}</div></div>', unsafe_allow_html=True)
 
     tab1, tab2, tab3 = st.tabs(["🔍 Поиск", "🖼️ Картинки", "📺 Видео"])
     
     with tab1:
-        st.markdown(f'<div class="alice-card"><div style="color:#8e44ad; font-weight:bold; margin-bottom:10px;">🟣 КУСИЦА АССИСТЕНТ</div>{st.session_state.res["ans"]}</div>', unsafe_allow_html=True)
-        
-        with st.expander("💬 Уточнить у ассистента"):
-            u_q = st.text_input("Ваш вопрос...")
-            if u_q: st.info(get_ai_res([{"role":"assistant", "content": st.session_state.res['ans']}, {"role":"user", "content": u_q}]))
-
-        st.write("---")
+        st.markdown(f'<div class="alice-card"><b>🟣 КУСИЦА АССИСТЕНТ</b><br><br>{st.session_state.res["ans"]}</div>', unsafe_allow_html=True)
         for l in st.session_state.res['links'][:st.session_state.limits['links']]:
-            st.markdown(f'<div style="margin-bottom:20px;"><a href="{l["link"]}" target="_blank" style="font-size:19px; color:#1a0dab; text-decoration:none;">{l["title"]}</a><br><small style="color:#006621;">{l["link"][:80]}...</small><div style="font-size:14px; color:#444;">{l.get("snippet","")}</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="search-result"><a class="search-title" href="{l["link"]}" target="_blank">{l["title"]}</a><span class="search-url">{l["link"][:70]}...</span><div style="font-size:14px;">{l.get("snippet","")}</div></div>', unsafe_allow_html=True)
         if st.button("Показать еще ссылки"): st.session_state.limits['links'] += 5; st.rerun()
 
     with tab2:
         imgs = st.session_state.res['imgs']
         if st.session_state.view_img_idx is not None:
             idx = st.session_state.view_img_idx
-            st.button("⬅️ Галерея", on_click=lambda: setattr(st.session_state, 'view_img_idx', None))
+            st.button("⬅️ Назад", on_click=lambda: setattr(st.session_state, 'view_img_idx', None))
             c1, c2, c3 = st.columns([1, 8, 1])
             with c1: 
                 if idx > 0 and st.button("◀️"): st.session_state.view_img_idx -= 1; st.rerun()
@@ -201,7 +192,7 @@ if st.session_state.res:
             for i, img in enumerate(imgs[:st.session_state.limits['imgs']]):
                 with cols[i % 2]:
                     st.markdown(f'<div class="img-box"><img src="{img["imageUrl"]}" style="width:100%; border-radius:10px;"><br><small>{img.get("source","")}</small></div>', unsafe_allow_html=True)
-                    if st.button(f"Увеличить #{i+1}", key=f"img_z_{i}"): st.session_state.view_img_idx = i; st.rerun()
+                    if st.button(f"Увеличить #{i+1}", key=f"z_{i}"): st.session_state.view_img_idx = i; st.rerun()
             if st.button("Больше картинок"): st.session_state.limits['imgs'] += 10; st.rerun()
 
     with tab3:
@@ -212,7 +203,6 @@ if st.session_state.res:
                 st.markdown(f"**{v['title']}**")
                 st.link_button("▶️ Смотреть", v['link'])
         if st.button("Больше видео"): st.session_state.limits['vids'] += 4; st.rerun()
-
 else:
     # ГЛАВНАЯ (НОВОСТИ)
     st.write("---")
