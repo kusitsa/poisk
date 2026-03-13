@@ -10,7 +10,7 @@ import streamlit.components.v1 as components
 # 1. КОНФИГУРАЦИЯ СТРАНИЦЫ
 st.set_page_config(page_title="КУСИЦА — Супер Портал", page_icon="🔍", layout="wide")
 
-# 2. УЛЬТРА CSS (Исправление пропорций картинок)
+# 2. УЛЬТРА CSS (Яндекс-стайл + Квадратные изображения)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap');
@@ -30,18 +30,18 @@ st.markdown("""
     .result-domain { color: #006621; font-size: 14px; margin-bottom: 2px; font-weight: 500; }
     .result-title { font-size: 20px; color: #1a0dab; text-decoration: none; font-weight: 500; display: block; }
     
-    /* КВАДРАТНЫЕ КАРТИНКИ */
+    /* КВАДРАТНЫЕ КАРТИНКИ (Сетка) */
     .img-square { 
         width: 100%; 
         aspect-ratio: 1 / 1; 
         object-fit: cover; 
         border-radius: 15px; 
         border: 1px solid #eee;
-        background: #f9f9f9;
+        margin-bottom: 5px;
     }
     
-    /* КВАДРАТНЫЕ ВИДЕО (МАЛЕНЬКИЕ) */
-    .video-row { display: flex; gap: 15px; background: #fff; padding: 10px; border-radius: 15px; border-bottom: 1px solid #f0f0f0; align-items: center; }
+    /* КВАДРАТНЫЕ ПРЕВЬЮ ВИДЕО (Маленькие) */
+    .video-row { display: flex; gap: 15px; background: #fff; padding: 10px; border-radius: 15px; border-bottom: 1px solid #f0f0f0; align-items: center; margin-bottom: 10px; }
     .video-thumb { 
         width: 100px; 
         height: 100px; 
@@ -51,15 +51,16 @@ st.markdown("""
         background: #000;
     }
 
-    .alice-card { background: #fdfdff; padding: 25px; border-radius: 25px; box-shadow: 0 10px 40px rgba(0,0,0,0.05); border-left: 8px solid #8e44ad; margin-bottom: 20px; }
+    .alice-card { background: #fdfdff; padding: 25px; border-radius: 25px; box-shadow: 0 10px 40px rgba(0,0,0,0.05); border-left: 6px solid #8e44ad; margin-bottom: 20px; }
     
     @media (max-width: 640px) {
         .logo { font-size: 30px; text-align: center; }
+        .informer-box { justify-content: center; }
     }
     </style>
     """, unsafe_allow_html=True)
 
-# 3. ИНИЦИАЛИЗАЦИЯ
+# 3. ИНИЦИАЛИЗАЦИЯ ПАМЯТИ
 state = st.session_state
 if 'links' not in state: state.links = []
 if 'images' not in state: state.images = []
@@ -77,7 +78,7 @@ def get_ai_res(msgs):
                           headers={"Authorization": f"Bearer {api_key}"}, 
                           json={"model": "llama-3.1-8b-instant", "messages": msgs, "temperature": 0.7}, timeout=20).json()
         return res['choices'][0]['message']['content']
-    except: return "Кусица задумалась..."
+    except: return "Кусица задумалась. Попробуйте еще раз."
 
 def perform_search(q, p=1):
     s_key = st.secrets["SERPER_API_KEY"]
@@ -86,19 +87,25 @@ def perform_search(q, p=1):
         state.links, state.images, state.videos, state.page, state.ai_history = [], [], [], 1, []
     
     try:
+        # Текст (gl=ru для поиска по РФ)
         r_t = requests.post("https://google.serper.dev/search", headers=h, json={"q": q, "hl": "ru", "gl": "ru", "page": p}).json()
         state.links.extend(r_t.get('organic', []))
-        r_i = requests.post("https://google.serper.dev/images", headers=h, json={"q": q, "page": p}).json()
+        
+        # Картинки (gl=ru)
+        r_i = requests.post("https://google.serper.dev/images", headers=h, json={"q": q, "hl": "ru", "gl": "ru", "page": p}).json()
         state.images.extend(r_i.get('images', []))
-        r_v = requests.post("https://google.serper.dev/videos", headers=h, json={"q": q, "page": p}).json()
+        
+        # Видео (gl=ru + добавление сайтов для видео)
+        r_v = requests.post("https://google.serper.dev/videos", headers=h, json={"q": q, "hl": "ru", "gl": "ru", "page": p}).json()
         state.videos.extend(r_v.get('videos', []))
         
         if p == 1:
             ctx = "\n".join([l.get('snippet','') for l in state.links[:3]])
             ans = get_ai_res([{"role":"system","content":"Ты Кусица. Отвечай подробно."}, {"role":"user","content":f"Вопрос: {q}\nИнфо: {ctx}"}])
             state.ai_history.append({"role": "assistant", "content": ans})
+        
         state.last_q, state.page = q, p
-    except: st.error("Ошибка сети")
+    except: st.error("Ошибка связи с сервером")
 
 # --- ШАПКА ---
 col_l, col_i = st.columns([1, 4])
@@ -111,9 +118,9 @@ with col_i:
     except: pass
 
 # --- ПОИСК ---
-q_in = st.text_input("", placeholder="Найдётся всё...", key="main_search", label_visibility="collapsed")
-if st.button("Найти ответ ➔") or (q_in and q_in != state.last_q):
-    perform_search(q_in, 1)
+q_input = st.text_input("", placeholder="Найдётся всё...", key="main_search", label_visibility="collapsed")
+if st.button("Найти ответ ➔") or (q_input and q_input != state.last_q):
+    perform_search(q_input, 1)
 
 # --- ВЫВОД ---
 if state.links:
@@ -121,8 +128,9 @@ if state.links:
     
     with t1:
         st.markdown(f'<div class="alice-card"><b>🟣 КУСИЦА АССИСТЕНТ</b><br><br>{state.ai_history[0]["content"]}</div>', unsafe_allow_html=True)
+        # Окно уточнения
         with st.expander("💬 Уточнить ответ"):
-            u_q = st.text_input("Ваш вопрос...")
+            u_q = st.text_input("Задайте вопрос...")
             if u_q: st.write(f"**Ответ:** {get_ai_res([{'role':'assistant','content':state.ai_history[0]['content']},{'role':'user','content':u_q}])}")
 
         st.write("---")
@@ -156,20 +164,21 @@ if state.links:
 
     with t3:
         for v in state.videos:
+            # Превью видео (квадратное) + текст справа
             st.markdown(f"""
             <div class="video-row">
-                <img src="{v.get('imageUrl','')}" class="video-thumb">
+                <img src="{v.get('imageUrl','https://via.placeholder.com/100')}" class="video-thumb">
                 <div>
-                    <div style="font-size:16px; font-weight:bold;">{v['title']}</div>
-                    <div style="color:green; font-size:12px;">{v.get('source','Video')}</div>
-                    <a href="{v['link']}" target="_blank" style="color:#1a0dab; font-size:14px; font-weight:bold; text-decoration:none;">▶️ Смотреть</a>
+                    <div style="font-size:16px; font-weight:bold; color:#000;">{v['title']}</div>
+                    <div style="color:green; font-size:12px; margin: 3px 0;">{v.get('source','Видео')}</div>
+                    <a href="{v['link']}" target="_blank" style="color:#1a0dab; font-size:14px; font-weight:bold; text-decoration:none;">▶️ Смотреть видео</a>
                 </div>
             </div>
             """, unsafe_allow_html=True)
         if st.button("Больше видео"): perform_search(state.last_q, state.page + 1); st.rerun()
 
 else:
-    # ГЛАВНАЯ (НОВОСТИ)
+    # ГЛАВНАЯ
     st.write("---")
     st.subheader("Главное сегодня")
     try:
