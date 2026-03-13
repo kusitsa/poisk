@@ -2,7 +2,6 @@ import streamlit as st
 import requests
 import uuid
 import pytz
-import re
 from datetime import datetime
 from urllib.parse import urlparse
 import streamlit.components.v1 as components
@@ -10,19 +9,17 @@ import streamlit.components.v1 as components
 # 1. КОНФИГУРАЦИЯ СТРАНИЦЫ
 st.set_page_config(page_title="КУСИЦА — Поисковая Система", page_icon="🔍", layout="wide")
 
-# 2. УЛЬТРА CSS
+# 2. УЛЬТРА CSS (Яндекс-стайл)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #fff; }
     .logo { font-size: 38px; font-weight: 900; letter-spacing: -2.5px; color: #000; margin-bottom: 5px; }
     
-    /* Информеры */
     .informer-pill { background: #f2f2f4; padding: 4px 12px; border-radius: 12px; font-size: 11px; color: #555; white-space: nowrap; }
     .currency-red { border: 1px solid #ff4b4b; background: #fff5f5; color: #ff4b4b; font-weight: bold; padding: 2px 10px; border-radius: 10px; }
     
-    /* Поиск */
-    .stTextInput > div > div > input { font-size: 18px !important; padding: 22px 25px !important; border-radius: 30px !important; border: 2px solid #ffdb4d !important; }
+    .stTextInput > div > div > input { font-size: 18px !important; padding: 18px 22px !important; border-radius: 30px !important; border: 2px solid #ffdb4d !important; }
     .stButton > button { height: 50px; width: 100%; border-radius: 25px; background-color: #ffdb4d !important; color: black !important; font-size: 18px; font-weight: bold; }
     
     /* Фавиконки и Ссылки */
@@ -30,8 +27,10 @@ st.markdown("""
     .result-item { margin-bottom: 25px; padding: 10px; border-radius: 15px; }
     .result-title { font-size: 20px; color: #1a0dab; text-decoration: none; font-weight: 500; display: inline-block; vertical-align: middle; }
     
-    /* Квадратные превью */
-    .img-square { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 15px; border: 1px solid #eee; background: #f9f9f9; }
+    /* Квадратные картинки */
+    .img-square { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 15px; border: 1px solid #eee; margin-bottom: 5px; background: #f9f9f9; }
+    
+    /* Видео ряд */
     .video-row { display: flex; gap: 15px; background: #fff; padding: 10px; border-radius: 15px; border-bottom: 1px solid #f0f0f0; align-items: center; margin-bottom: 10px; }
     .video-thumb { width: 100px; height: 100px; min-width: 100px; object-fit: cover; border-radius: 12px; background: #000; }
 
@@ -52,7 +51,7 @@ def get_ai_res(msgs):
                           headers={"Authorization": f"Bearer {api_key}"}, 
                           json={"model": "llama-3.1-8b-instant", "messages": msgs, "temperature": 0.7}, timeout=20).json()
         return res['choices'][0]['message']['content']
-    except: return "Кусица задумалась..."
+    except: return "Кусица задумалась. Попробуйте еще раз."
 
 def perform_search(q, p=1):
     if not q: return
@@ -71,18 +70,18 @@ def perform_search(q, p=1):
         r_i = requests.post("https://google.serper.dev/images", headers=h, json={"q": q, "hl": "ru", "gl": "ru", "page": p}).json()
         state.images.extend(r_i.get('images', []))
         
-        # 3. Видео (Усиление RU сегмента: RuTube, VK, Dzen)
-        video_query = f"{q} site:rutube.ru OR site:vk.com OR site:dzen.ru OR site:ok.ru"
-        r_v = requests.post("https://google.serper.dev/videos", headers=h, json={"q": video_query, "hl": "ru", "gl": "ru", "page": p}).json()
+        # 3. Видео (Приоритет RuTube, VK, Dzen)
+        video_q = f"{q} site:rutube.ru OR site:vk.com OR site:dzen.ru OR site:ok.ru"
+        r_v = requests.post("https://google.serper.dev/videos", headers=h, json={"q": video_q, "hl": "ru", "gl": "ru", "page": p}).json()
         state.videos.extend(r_v.get('videos', []))
         
-        if p == 1:
+        if p == 1 and state.links:
             ctx = "\n".join([l.get('snippet','') for l in state.links[:3]])
             ans = get_ai_res([{"role":"system","content":"Ты Кусица. Отвечай подробно."}, {"role":"user","content":f"Вопрос: {q}\nИнфо: {ctx}"}])
-            state.ai_history.append({"role": "assistant", "content": ans})
+            state.ai_history = [{"content": ans}]
         
         state.last_q, state.page = q, p
-    except: st.error("Ошибка сети")
+    except: st.error("Ошибка связи")
 
 # --- ШАПКА ---
 col_l, col_i = st.columns([1, 4])
@@ -91,10 +90,10 @@ with col_i:
     try:
         w = requests.get("https://wttr.in/Moscow?format=%t", timeout=2).text.strip()
         c = requests.get("https://open.er-api.com/v6/latest/USD", timeout=2).json()
-        st.markdown(f'<div style="display:flex; gap:10px;"><div class="informer-pill">🌡️ МСК {w}</div><div class="currency-red">USD {round(c["rates"]["RUB"], 2)}₽</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="display:flex; gap:10px;"><div class="informer-pill">🌡️ {w}</div><div class="currency-red">USD {round(c["rates"]["RUB"], 2)}₽</div></div>', unsafe_allow_html=True)
     except: pass
 
-# --- URL ПОИСК (?q=...) ---
+# --- ОБРАБОТКА URL (?q=...) ---
 url_query = st.query_params.get("q")
 if url_query and state.last_q != url_query: perform_search(url_query, 1)
 
@@ -108,7 +107,10 @@ if state.links:
     t1, t2, t3 = st.tabs(["🔍 Поиск", "🖼️ Картинки", "📺 Видео"])
     
     with t1:
-        st.markdown(f'<div class="alice-card"><b>🟣 КУСИЦА АССИСТЕНТ</b><br><br>{state.ai_history[0]["content"]}</div>', unsafe_allow_html=True)
+        # Проверка, есть ли ответ ассистента
+        if state.ai_history:
+            st.markdown(f'<div class="alice-card"><b>🟣 КУСИЦА АССИСТЕНТ</b><br><br>{state.ai_history[0]["content"]}</div>', unsafe_allow_html=True)
+        
         st.write("---")
         for l in state.links:
             domain = urlparse(l['link']).netloc
@@ -146,7 +148,7 @@ if state.links:
             if st.button("Больше картинок"): perform_search(state.last_q, state.page + 1); st.rerun()
 
     with t3:
-        if not state.videos: st.write("Видео из РФ не найдены. Попробуйте другой запрос.")
+        if not state.videos: st.write("Видео не найдены.")
         for v in state.videos:
             st.markdown(f"""
             <div class="video-row">
@@ -161,7 +163,7 @@ if state.links:
         if st.button("Больше видео"): perform_search(state.last_q, state.page + 1); st.rerun()
 
 else:
-    # ГЛАВНАЯ (НОВОСТИ)
+    # ГЛАВНАЯ
     st.write("---")
     st.subheader("Главное сегодня")
     try:
