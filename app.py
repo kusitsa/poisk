@@ -9,7 +9,7 @@ import streamlit.components.v1 as components
 # 1. КОНФИГУРАЦИЯ СТРАНИЦЫ
 st.set_page_config(page_title="КУСИЦА", page_icon="🔍", layout="wide")
 
-# 2. УЛЬТРА CSS (Мобильная адаптация + Яндекс-стайл)
+# 2. УЛЬТРА CSS
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap');
@@ -19,139 +19,160 @@ st.markdown("""
     .informer-pill { background: #f2f2f4; padding: 4px 10px; border-radius: 10px; display: flex; align-items: center; gap: 4px; color: #555; white-space: nowrap; }
     .currency-red { border: 1px solid #ff4b4b; background: #fff5f5; color: #ff4b4b; font-weight: bold; padding: 2px 8px; border-radius: 8px; }
     .stTextInput > div > div > input { font-size: 18px !important; padding: 18px 22px !important; border-radius: 25px !important; border: 2px solid #ffdb4d !important; }
-    .stButton > button { height: 52px; width: 100%; border-radius: 25px; background-color: #ffdb4d !important; color: black !important; font-size: 18px; font-weight: bold; border: none !important; }
-    .alice-card { background: #fdfdff; padding: 20px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); border-left: 6px solid #8e44ad; margin-top: 10px; font-size: 17px; line-height: 1.5; }
+    .stButton > button { height: 52px; width: 100%; border-radius: 25px; background-color: #ffdb4d !important; color: black !important; font-size: 18px; font-weight: bold; }
+    .alice-card { background: #fdfdff; padding: 20px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); border-left: 6px solid #8e44ad; margin-bottom: 20px; font-size: 17px; line-height: 1.5; }
+    .result-item { margin-bottom: 25px; border-bottom: 1px solid #f0f0f0; padding-bottom: 15px; }
+    .result-title { font-size: 19px; color: #1a0dab; text-decoration: none; font-weight: 500; }
+    .result-url { color: #006621; font-size: 13px; display: block; overflow: hidden; text-overflow: ellipsis; }
     .img-box { border: 1px solid #eee; border-radius: 12px; padding: 5px; text-align: center; background: #fff; margin-bottom: 10px; }
-    .video-card { background: #f9f9f9; padding: 10px; border-radius: 15px; border: 1px solid #eee; margin-bottom: 15px; }
-    .messenger-box { background: #e7f3ff; padding: 15px; border-radius: 15px; border: 2px solid #007bff; margin-top: 10px; }
     @media (max-width: 640px) { .logo { font-size: 28px; text-align: center; } .informer-box { justify-content: center; } }
     </style>
     """, unsafe_allow_html=True)
 
 # 3. ИНИЦИАЛИЗАЦИЯ ПАМЯТИ
-if 'res' not in st.session_state: st.session_state.res = None
-if 'history' not in st.session_state: st.session_state.history = []
-if 'limits' not in st.session_state: st.session_state.limits = {"links": 3, "imgs": 8, "vids": 4}
+if 'all_links' not in st.session_state: st.session_state.all_links = []
+if 'all_images' not in st.session_state: st.session_state.all_images = []
+if 'all_videos' not in st.session_state: st.session_state.all_videos = []
+if 'ai_answer' not in st.session_state: st.session_state.ai_answer = ""
+if 'current_page' not in st.session_state: st.session_state.current_page = 1
+if 'last_query' not in st.session_state: st.session_state.last_query = ""
 if 'view_img_idx' not in st.session_state: st.session_state.view_img_idx = None
-if 'msg_open' not in st.session_state: st.session_state.msg_open = False
 
 # 4. ФУНКЦИИ API
 @st.cache_data(ttl=600)
 def get_header_data():
     try:
-        tz_m, tz_k = pytz.timezone('Europe/Moscow'), pytz.timezone('Asia/Almaty')
-        now = datetime.now(tz_m)
+        tz_m = pytz.timezone('Europe/Moscow')
         w = requests.get("https://wttr.in/Moscow?format=%t", timeout=2).text.strip()
         curr = requests.get("https://open.er-api.com/v6/latest/USD", timeout=2).json()
-        return now.strftime("%d.%m"), now.strftime("%H:%M"), datetime.now(tz_k).strftime("%H:%M"), w, round(curr['rates']['RUB'], 2)
-    except: return "??", "??", "??", "?", "??"
+        return datetime.now(tz_m).strftime("%d.%m"), datetime.now(tz_m).strftime("%H:%M"), w, round(curr['rates']['RUB'], 2)
+    except: return "??", "??", "?", "??"
 
-def get_ai_res(msgs):
+def get_ai_res(q, context):
     try:
         api_key = st.secrets["GROQ_API_KEY"]
-        url = "https://api.groq.com/openai/v1/chat/completions"
-        payload = {"model": "llama-3.1-8b-instant", "messages": msgs, "temperature": 0.6}
-        res = requests.post(url, headers={"Authorization": f"Bearer {api_key}"}, json=payload, timeout=20).json()
+        payload = {
+            "model": "llama-3.1-8b-instant",
+            "messages": [{"role":"system","content":"Ты Кусица. Отвечай подробно."}, {"role":"user","content":f"Вопрос: {q}\nИнфо: {context}"}],
+            "temperature": 0.6
+        }
+        res = requests.post("https://api.groq.com/openai/v1/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json=payload, timeout=20).json()
         return res['choices'][0]['message']['content']
-    except: return "Кусица призадумалась. Попробуйте снова."
+    except: return "Кусица призадумалась..."
 
-@st.cache_data(ttl=1800)
-def fetch_news(key):
-    try:
-        r = requests.post("https://google.serper.dev/news", headers={'X-API-KEY': key}, json={"q": "главные новости", "gl": "ru", "hl": "ru"}).json()
-        return r.get('news', [])[:5]
-    except: return []
+# 5. ГЛАВНАЯ ФУНКЦИЯ ПОИСКА (С ПАГИНАЦИЕЙ)
+def run_search(query, page=1):
+    s_key = st.secrets["SERPER_API_KEY"]
+    headers = {'X-API-KEY': s_key, 'Content-Type': 'application/json'}
+    
+    # Если это новый запрос - чистим память
+    if page == 1:
+        st.session_state.all_links = []
+        st.session_state.all_images = []
+        st.session_state.all_videos = []
+        st.session_state.current_page = 1
+        st.session_state.ai_answer = ""
 
-# 5. ОБРАБОТКА ПОИСКА
-def perform_search(q):
-    if q:
-        with st.spinner(" "):
-            try:
-                s_key = st.secrets["SERPER_API_KEY"]
-                sr = requests.post("https://google.serper.dev/search", headers={'X-API-KEY': s_key}, json={"q": q, "hl": "ru"}).json()
-                ir = requests.post("https://google.serper.dev/images", headers={'X-API-KEY': s_key}, json={"q": q}).json()
-                vr = requests.post("https://google.serper.dev/videos", headers={'X-API-KEY': s_key}, json={"q": q}).json()
-                links = sr.get('organic', [])
-                ans = get_ai_res([{"role":"system","content":"Ты Кусица. Отвечай подробно."}, {"role":"user","content":f"Вопрос: {q}\nДанные: {links[:3]}"}])
-                st.session_state.res = {"ans": ans, "links": links, "imgs": ir.get('images', []), "vids": vr.get('videos', []), "q": q}
-                if q not in st.session_state.history: st.session_state.history.append(q)
-                st.session_state.last_q = q
-                st.session_state.view_img_idx = None
-            except: st.error("Ошибка сети")
+    with st.spinner(f"Загрузка результатов (страница {page})..."):
+        try:
+            # Запрос текста
+            res_text = requests.post("https://google.serper.dev/search", headers=headers, 
+                                   json={"q": query, "hl": "ru", "gl": "ru", "page": page}).json()
+            # Запрос картинок
+            res_img = requests.post("https://google.serper.dev/images", headers=headers, 
+                                  json={"q": query, "page": page}).json()
+            # Запрос видео
+            res_vid = requests.post("https://google.serper.dev/videos", headers=headers, 
+                                  json={"q": query, "page": page}).json()
+
+            # Добавляем данные в общий список
+            st.session_state.all_links.extend(res_text.get('organic', []))
+            st.session_state.all_images.extend(res_img.get('images', []))
+            st.session_state.all_videos.extend(res_vid.get('videos', []))
+            
+            # Генерируем ИИ ответ только для первой страницы
+            if page == 1:
+                ctx = "\n".join([l.get('snippet','') for l in res_text.get('organic', [])[:3]])
+                st.session_state.ai_answer = get_ai_res(query, ctx)
+                
+            st.session_state.last_query = query
+            st.session_state.current_page = page
+        except Exception as e:
+            st.error(f"Ошибка сети: {e}")
 
 # --- ШАПКА ---
-d, tm, tk, w, usd_r = get_header_data()
+d, tm, w, usd_r = get_header_data()
 st.markdown(f'<div class="logo">КУСИЦА</div>', unsafe_allow_html=True)
-st.markdown(f"""
-    <div class="informer-box">
-        <div class="informer-pill">📅 {d}</div><div class="informer-pill">🕒 МСК {tm}</div>
-        <div class="informer-pill">🇰🇿 КЗ {tk}</div><div class="informer-pill">🌡️ МСК {w}</div>
-        <div class="currency-red">USD {usd_r}₽</div>
-    </div>
-    """, unsafe_allow_html=True)
+st.markdown(f'<div class="informer-box"><div class="informer-pill">📅 {d}</div><div class="informer-pill">🕒 МСК {tm}</div><div class="informer-pill">🌡️ {w}</div><div class="currency-red">USD {usd_r}₽</div></div>', unsafe_allow_html=True)
 
-# --- ПРОВЕРКА URL ПАРАМЕТРОВ (Для системного поиска) ---
-url_query = st.query_params.get("q")
-if url_query and st.session_state.get('last_q') != url_query:
-    perform_search(url_query)
+# --- ПОИСК ---
+url_q = st.query_params.get("q")
+q_input = st.text_input("", value=url_q if url_q and not st.session_state.last_query else "", placeholder="Найдётся всё...", key="main_search", label_visibility="collapsed")
 
-# --- ПОИСКОВАЯ СТРОКА ---
-col_q, col_b = st.columns([6, 1])
-with col_q: 
-    search_input = st.text_input("", value=url_query if url_query else "", placeholder="Найдётся всё...", key="main_search", label_visibility="collapsed")
-with col_b: 
-    btn = st.button("Найти ➔")
-
-if btn and search_input:
-    perform_search(search_input)
+if st.button("Найти ➔") or (q_input and q_input != st.session_state.last_query) or (url_q and not st.session_state.last_query):
+    query_to_use = q_input if q_input else url_q
+    run_search(query_to_use, page=1)
 
 # --- ВЫВОД РЕЗУЛЬТАТОВ ---
-if st.session_state.res:
-    res = st.session_state.res
-    tab1, tab2, tab3 = st.tabs(["🔍 Поиск", "🖼️ Картинки", "📺 Видео"])
+if st.session_state.all_links:
+    t1, t2, t3 = st.tabs(["🔍 Поиск", "🖼️ Картинки", "📺 Видео"])
     
-    with tab1:
-        st.markdown(f'<div class="alice-card"><b>🟣 КУСИЦА:</b><br><br>{res["ans"]}</div>', unsafe_allow_html=True)
-        for l in res['links'][:st.session_state.limits['links']]:
-            st.markdown(f'<div style="margin-bottom:20px;"><a href="{l["link"]}" target="_blank" style="font-size:19px; color:#1a0dab; text-decoration:none;">{l["title"]}</a><br><small style="color:#006621;">{l["link"][:70]}...</small><div>{l.get("snippet","")}</div></div>', unsafe_allow_html=True)
-        if st.button("Показать еще ссылки"): st.session_state.limits['links'] += 5; st.rerun()
+    with t1:
+        st.markdown(f'<div class="alice-card"><b>🟣 КУСИЦА:</b><br><br>{st.session_state.ai_answer}</div>', unsafe_allow_html=True)
+        for l in st.session_state.all_links:
+            st.markdown(f"""<div class="result-item">
+                <a class="result-title" href="{l['link']}" target="_blank">{l['title']}</a>
+                <span class="result-url">{l['link']}</span>
+                <div style="font-size:14px; color:#444; margin-top:5px;">{l.get('snippet','')}</div>
+            </div>""", unsafe_allow_html=True)
+        
+        if st.button("Показать еще ссылки ⬇️"):
+            run_search(st.session_state.last_query, page=st.session_state.current_page + 1)
+            st.rerun()
 
-    with tab2:
-        imgs = res['imgs']
+    with t2:
         if st.session_state.view_img_idx is not None:
             idx = st.session_state.view_img_idx
-            st.button("⬅️ Назад к галерее", on_click=lambda: setattr(st.session_state, 'view_img_idx', None))
-            st.image(imgs[idx]['imageUrl'], use_container_width=True)
-            st.subheader(imgs[idx].get('title', ''))
+            img = st.session_state.all_images[idx]
+            st.button("⬅️ Назад", on_click=lambda: setattr(st.session_state, 'view_img_idx', None))
+            st.image(img['imageUrl'], use_container_width=True)
+            st.subheader(img.get('title',''))
+            st.link_button(f"🌐 Перейти на {img.get('source','сайт')}", img['link'])
+            if st.button("📩 Отправить в Мессенджер"): st.info(f"Ссылка скопирована: {img['imageUrl']}")
             c1, c2 = st.columns(2)
-            with c1: st.link_button("🌐 На сайт", imgs[idx]['link'])
-            with c2: 
-                if st.button("📩 В Мессенджер"): st.session_state.msg_open = True
-            if st.session_state.msg_open:
-                st.code(imgs[idx]['imageUrl'])
-                if st.button("Закрыть мессенджер"): st.session_state.msg_open = False; st.rerun()
-            cp1, cp2 = st.columns(2)
-            with cp1: 
+            with c1: 
                 if idx > 0 and st.button("◀️ Назад"): st.session_state.view_img_idx -= 1; st.rerun()
-            with cp2:
-                if idx < len(imgs)-1 and st.button("Дальше ▶️"): st.session_state.view_img_idx += 1; st.rerun()
+            with c2:
+                if idx < len(st.session_state.all_images)-1 and st.button("Вперед ▶️"): st.session_state.view_img_idx += 1; st.rerun()
         else:
             cols = st.columns(2)
-            for i, img in enumerate(imgs[:st.session_state.limits['imgs']]):
+            for i, img in enumerate(st.session_state.all_images):
                 with cols[i % 2]:
-                    st.markdown(f'<div class="img-box"><img src="{img["imageUrl"]}" style="width:100%; border-radius:10px;"><br><small>{img.get("source","")}</small></div>', unsafe_allow_html=True)
-                    if st.button(f"Увеличить #{i+1}", key=f"z_{i}"): st.session_state.view_img_idx = i; st.rerun()
-            if st.button("Больше картинок"): st.session_state.limits['imgs'] += 10; st.rerun()
+                    st.markdown(f'<div class="img-box"><img src="{img["imageUrl"]}" style="width:100%; border-radius:10px;"></div>', unsafe_allow_html=True)
+                    if st.button(f"Увеличить #{i+1}", key=f"z_{i}"):
+                        st.session_state.view_img_idx = i
+                        st.rerun()
+            if st.button("Загрузить еще картинки 🖼️"):
+                run_search(st.session_state.last_query, page=st.session_state.current_page + 1)
+                st.rerun()
 
-    with tab3:
-        for v in res['vids'][:st.session_state.limits['vids']]:
-            st.markdown(f"""<div class="video-card"><b>{v['title']}</b><br><a href="{v['link']}" target="_blank">▶️ Смотреть на {v.get('source','сайте')}</a></div>""", unsafe_allow_html=True)
-        if st.button("Больше видео"): st.session_state.limits['vids'] += 4; st.rerun()
+    with t3:
+        for v in st.session_state.all_videos:
+            st.markdown(f"""<div style="background:#f9f9f9; padding:10px; border-radius:15px; margin-bottom:15px;">
+                <b>{v['title']}</b><br><a href="{v['link']}" target="_blank">▶️ Смотреть видео</a>
+            </div>""", unsafe_allow_html=True)
+        if st.button("Больше видео 📺"):
+            run_search(st.session_state.last_query, page=st.session_state.current_page + 1)
+            st.rerun()
+
 else:
-    # ГЛАВНАЯ (НОВОСТИ)
+    # Главная страница (новости)
     st.write("---")
     st.subheader("Главное сегодня")
-    for n in fetch_news(st.secrets.get("SERPER_API_KEY", "")):
-        st.markdown(f"📰 [{n['title']}]({n['link']})")
+    try:
+        n_res = requests.post("https://google.serper.dev/news", headers={'X-API-KEY': st.secrets["SERPER_API_KEY"]}, json={"q": "новости сегодня", "hl": "ru"}).json()
+        for n in n_res.get('news', [])[:5]:
+            st.markdown(f"📰 [{n['title']}]({n['link']})")
+    except: st.write("Загрузка новостей...")
 
 st.markdown("<br><hr><center style='color:#ccc; font-size:10px;'>КУСИЦА • 2024</center>", unsafe_allow_html=True)
