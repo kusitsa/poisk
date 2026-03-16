@@ -9,7 +9,7 @@ import streamlit.components.v1 as components
 # 1. КОНФИГУРАЦИЯ СТРАНИЦЫ
 st.set_page_config(page_title="КУСИЦА — Поисковая Система", page_icon="🔍", layout="wide")
 
-# 2. УЛЬТРА CSS (Яндекс-стайл)
+# 2. УЛЬТРА CSS
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap');
@@ -22,28 +22,21 @@ st.markdown("""
         color: #000 !important; cursor: pointer !important; text-align: left !important;
     }
     
-    .informer-box { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
     .informer-pill { background: #f2f2f4; padding: 4px 12px; border-radius: 12px; font-size: 11px; color: #555; white-space: nowrap; }
     .currency-red { border: 1px solid #ff4b4b; background: #fff5f5; color: #ff4b4b; font-weight: bold; padding: 2px 10px; border-radius: 10px; font-size: 11px; }
     
-    /* Поисковая строка */
     .stTextInput > div > div > input { font-size: 18px !important; padding: 18px 22px !important; border-radius: 30px !important; border: 2px solid #ffdb4d !important; }
     .stButton > button:not([key="logo_btn"]) { height: 50px; width: 100%; border-radius: 25px; background-color: #ffdb4d !important; color: black !important; font-size: 18px; font-weight: bold; }
     
-    /* Виджет Переводчика */
     .translator-box { background: #f8f9fa; padding: 20px; border-radius: 25px; border: 2px solid #ffdb4d; margin-bottom: 25px; }
-    
-    /* Результаты поиска */
     .favicon { width: 18px; height: 18px; vertical-align: middle; margin-right: 8px; border-radius: 3px; }
     .result-item { margin-bottom: 25px; padding: 10px; border-radius: 15px; }
     .result-title { font-size: 20px; color: #1a0dab; text-decoration: none; font-weight: 500; }
     
-    /* Медиа (Квадраты) */
     .img-square { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 15px; border: 1px solid #eee; margin-bottom: 5px; background: #f9f9f9; }
     .video-row { display: flex; gap: 15px; background: #fff; padding: 10px; border-radius: 15px; border-bottom: 1px solid #f0f0f0; align-items: center; margin-bottom: 10px; }
     .video-thumb { width: 100px; height: 100px; min-width: 100px; object-fit: cover; border-radius: 12px; background: #000; }
 
-    /* Карточка ассистента */
     .alice-card { background: #fdfdff; padding: 25px; border-radius: 25px; box-shadow: 0 10px 40px rgba(0,0,0,0.05); border-left: 8px solid #8e44ad; margin-bottom: 20px; }
     .chat-bubble { background: #f0f2f5; padding: 15px; border-radius: 15px; margin-top: 10px; border-left: 4px solid #8e44ad; }
     </style>
@@ -51,8 +44,12 @@ st.markdown("""
 
 # 3. ИНИЦИАЛИЗАЦИЯ ПАМЯТИ
 state = st.session_state
-for k in ['links', 'images', 'videos', 'ai_history', 'last_q', 'page', 'view_img_idx', 'chat_extra']:
-    if k not in state: state[k] = [] if 's' in k or 'history' in k or 'extra' in k else (1 if k=='page' else None)
+keys_to_init = ['links', 'images', 'videos', 'ai_history', 'last_q', 'page', 'view_img_idx', 'chat_extra']
+for k in keys_to_init:
+    if k not in state:
+        if k in ['links', 'images', 'videos', 'ai_history', 'chat_extra']: state[k] = []
+        elif k == 'page': state[k] = 1
+        else: state[k] = None
 
 # 4. ФУНКЦИИ API
 def get_ai_res(msgs):
@@ -83,7 +80,6 @@ def perform_search(q, p=1):
     if p == 1: state.links, state.images, state.videos, state.page, state.ai_history, state.chat_extra = [], [], [], 1, [], []
     
     try:
-        # Поиск
         r_t = requests.post("https://google.serper.dev/search", headers=h, json={"q": q, "hl": "ru", "gl": "ru", "page": p}).json()
         state.links.extend(r_t.get('organic', []))
         r_i = requests.post("https://google.serper.dev/images", headers=h, json={"q": q, "hl": "ru", "gl": "ru", "page": p}).json()
@@ -104,7 +100,10 @@ d_s, t_s, w_m, u_v, e_v = get_header_data()
 col_l, col_i = st.columns([1, 4])
 with col_l:
     if st.button("КУСИЦА", key="logo_btn"):
-        for k in ['links', 'images', 'videos', 'ai_history', 'last_q', 'page', 'chat_extra']: state[k] = [] if 's' in k or 'history' in k or 'extra' in k else 1
+        for k in ['links', 'images', 'videos', 'ai_history', 'last_q', 'page', 'chat_extra']:
+            if k in ['links', 'images', 'videos', 'ai_history', 'chat_extra']: state[k] = []
+            elif k == 'page': state[k] = 1
+            else: state[k] = None
         st.query_params.clear()
         st.rerun()
 
@@ -131,7 +130,7 @@ if st.button("Найти ответ ➔") or (q_input and q_input != state.last_
 if q_input and "переводчик" in q_input.lower():
     st.markdown('<div class="translator-box">', unsafe_allow_html=True)
     st.markdown("### 🌐 КУСИЦА ПЕРЕВОДЧИК")
-    l_list = ["Русский", "English", "Deutsch", "Français", "Қазақша", "中文", "日本語"]
+    l_list = ["Русский", "English", "Deutsch", "Français", "Қазақша", "中文"]
     c1, c2 = st.columns(2)
     with c1:
         lf = st.selectbox("Из", l_list, index=0)
@@ -139,7 +138,7 @@ if q_input and "переводчик" in q_input.lower():
     with c2:
         lt = st.selectbox("В", l_list, index=1)
         if ti:
-            res_t = get_ai_res([{"role":"user", "content":f"Переведи с {lf} на {lt}: {ti}. Выдай только текст."}])
+            res_t = get_ai_res([{"role":"user", "content":f"Переведи с {lf} на {lt}: {ti}. Выдай только перевод."}])
             st.text_area("Результат", value=res_t, height=100, key="to")
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -150,19 +149,15 @@ if state.links:
     with t1:
         if state.ai_history:
             st.markdown(f'<div class="alice-card"><b>🟣 КУСИЦА АССИСТЕНТ</b><br><br>{state.ai_history[0]["content"]}</div>', unsafe_allow_html=True)
-            
-            # ФУНКЦИЯ УТОЧНЕНИЯ (ЧАТ)
-            with st.container():
-                for chat in state.chat_extra:
-                    st.markdown(f'<div class="chat-bubble"><b>Вы:</b> {chat["q"]}<br><b>Кусица:</b> {chat["a"]}</div>', unsafe_allow_html=True)
-                
-                u_q = st.text_input("Уточнить запрос у Кусицы...", key="follow_up_input")
-                if st.button("Спросить"):
-                    if u_q:
-                        with st.spinner(" "):
-                            new_a = get_ai_res([{"role":"assistant","content":state.ai_history[0]["content"]}, {"role":"user","content":u_q}])
-                            state.chat_extra.append({"q": u_q, "a": new_a})
-                            st.rerun()
+            for chat in state.chat_extra:
+                st.markdown(f'<div class="chat-bubble"><b>Вы:</b> {chat["q"]}<br><b>Кусица:</b> {chat["a"]}</div>', unsafe_allow_html=True)
+            u_q = st.text_input("Уточнить запрос у Кусицы...", key="follow_up_input")
+            if st.button("Спросить"):
+                if u_q:
+                    with st.spinner(" "):
+                        new_a = get_ai_res([{"role":"assistant","content":state.ai_history[0]["content"]},{"role":"user","content":u_q}])
+                        state.chat_extra.append({"q": u_q, "a": new_a})
+                        st.rerun()
 
         st.write("---")
         for l in state.links:
@@ -196,8 +191,7 @@ if state.links:
             for i, img in enumerate(state.images):
                 with cols[i % 2]:
                     st.markdown(f'<img src="{img["imageUrl"]}" class="img-square">', unsafe_allow_html=True)
-                    if st.button(f"Увеличить #{i+1}", key=f"z_{i}"):
-                        state.view_img_idx = i; st.rerun()
+                    if st.button(f"Увеличить #{i+1}", key=f"z_{i}"): state.view_img_idx = i; st.rerun()
             if st.button("Больше картинок"): perform_search(state.last_q, state.page + 1); st.rerun()
 
     with t3:
@@ -206,12 +200,16 @@ if state.links:
         if st.button("Больше видео"): perform_search(state.last_q, state.page + 1); st.rerun()
 
 else:
-    # НОВОСТИ
+    # ГЛАВНАЯ - НОВОСТИ
     st.write("---")
     st.subheader("Главное сегодня в России")
     try:
-        api_k = st.secrets["SERPER_API_KEY"]
         n_res = requests.post("https://google.serper.dev/search", 
-                            headers={'X-API-KEY': api_k, 'Content-Type': 'application/json'}, 
-                            json={"q": "новости
-        
+                            headers={'X-API-KEY': st.secrets["SERPER_API_KEY"], 'Content-Type': 'application/json'}, 
+                            json={"q": "последние новости России сегодня", "gl": "ru", "hl": "ru", "tbm": "nws"}).json()
+        articles = n_res.get('news', []) or n_res.get('organic', [])
+        for n in articles[:6]:
+            st.markdown(f'<div style="padding:10px; border-bottom:1px solid #eee;"><a href="{n.get("link")}" target="_blank" style="color:#000; text-decoration:none;">📰 {n.get("title")}</a></div>', unsafe_allow_html=True)
+    except: st.write("Новости загружаются...")
+
+st.markdown("<br><hr><center style='color:#ccc; font-size:10px;'>КУСИЦА 2024</center>", unsafe_allow_html=True)
