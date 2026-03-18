@@ -4,49 +4,59 @@ import uuid
 import pytz
 from datetime import datetime
 from urllib.parse import urlparse
-from duckduckgo_search import DDGS
+import streamlit.components.v1 as components
 
 # 1. КОНФИГУРАЦИЯ СТРАНИЦЫ
 st.set_page_config(page_title="КУСИЦА — Поисковая Система", page_icon="🔍", layout="wide")
 
-# 2. УЛЬТРА CSS
+# 2. УЛЬТРА CSS (Яндекс-стайл)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #fff; }
     
-    /* Кликабельный логотип */
+    /* Логотип-кнопка */
     .stButton > button[key="logo_btn"] {
         background: none !important; border: none !important; padding: 0 !important;
         font-size: 38px !important; font-weight: 900 !important; letter-spacing: -2.5px !important;
-        color: #000 !important; cursor: pointer !important;
+        color: #000 !important; cursor: pointer !important; text-align: left !important;
     }
     
+    /* Информеры */
     .informer-box { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
     .informer-pill { background: #f2f2f4; padding: 4px 12px; border-radius: 12px; font-size: 11px; color: #555; white-space: nowrap; }
     .currency-red { border: 1px solid #ff4b4b; background: #fff5f5; color: #ff4b4b; font-weight: bold; padding: 2px 10px; border-radius: 10px; font-size: 11px; }
     
+    /* Поиск */
     .stTextInput > div > div > input { font-size: 18px !important; padding: 18px 22px !important; border-radius: 30px !important; border: 2px solid #ffdb4d !important; }
     .stButton > button:not([key="logo_btn"]) { height: 50px; width: 100%; border-radius: 25px; background-color: #ffdb4d !important; color: black !important; font-size: 18px; font-weight: bold; }
     
+    /* Переводчик */
     .translator-box { background: #f8f9fa; padding: 20px; border-radius: 25px; border: 2px solid #ffdb4d; margin-bottom: 25px; }
+    
+    /* Результаты */
     .favicon { width: 18px; height: 18px; vertical-align: middle; margin-right: 8px; border-radius: 3px; }
     .result-item { margin-bottom: 25px; padding: 10px; border-radius: 15px; }
-    .result-title { font-size: 20px; color: #1a0dab; text-decoration: none; font-weight: 500; }
+    .result-title { font-size: 20px; color: #1a0dab; text-decoration: none; font-weight: 500; display: inline-block; vertical-align: middle; }
     
+    /* Квадраты */
     .img-square { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 15px; border: 1px solid #eee; margin-bottom: 5px; background: #f9f9f9; }
     .video-row { display: flex; gap: 15px; background: #fff; padding: 10px; border-radius: 15px; border-bottom: 1px solid #f0f0f0; align-items: center; margin-bottom: 10px; }
-    .video-thumb { width: 110px; height: 110px; min-width: 110px; object-fit: cover; border-radius: 12px; background: #000; }
+    .video-thumb { width: 100px; height: 100px; min-width: 100px; object-fit: cover; border-radius: 12px; background: #000; }
 
     .alice-card { background: #fdfdff; padding: 25px; border-radius: 25px; box-shadow: 0 10px 40px rgba(0,0,0,0.05); border-left: 8px solid #8e44ad; margin-bottom: 20px; }
+    .chat-bubble { background: #f0f2f5; padding: 15px; border-radius: 15px; margin-top: 10px; border-left: 4px solid #8e44ad; }
     </style>
     """, unsafe_allow_html=True)
 
 # 3. ИНИЦИАЛИЗАЦИЯ ПАМЯТИ
 state = st.session_state
-init_keys = ['links', 'images', 'videos', 'ai_history', 'last_q', 'chat_extra', 'view_img_idx']
+init_keys = ['links', 'images', 'videos', 'ai_history', 'last_q', 'page', 'view_img_idx', 'chat_extra']
 for k in init_keys:
-    if k not in state: state[k] = [] if 's' in k or 'history' in k or 'extra' in k else None
+    if k not in state:
+        if k in ['links', 'images', 'videos', 'ai_history', 'chat_extra']: state[k] = []
+        elif k == 'page': state[k] = 1
+        else: state[k] = None
 
 # 4. ФУНКЦИИ API
 def get_ai_res(msgs):
@@ -56,7 +66,7 @@ def get_ai_res(msgs):
                           headers={"Authorization": f"Bearer {api_key}"}, 
                           json={"model": "llama-3.1-8b-instant", "messages": msgs, "temperature": 0.7}, timeout=20).json()
         return res['choices'][0]['message']['content']
-    except: return "Кусица задумалась. Попробуйте еще раз."
+    except: return "Ошибка ассистента."
 
 @st.cache_data(ttl=600)
 def get_header_data():
@@ -70,32 +80,36 @@ def get_header_data():
         return now.strftime("%d.%m"), now.strftime("%H:%M"), w, usd, eur
     except: return "??.??", "??:??", "?", "??", "??"
 
-def perform_search(q):
+def perform_search(q, p=1):
     if not q: return
-    state.links, state.images, state.videos, state.ai_history, state.chat_extra = [], [], [], [], []
+    s_key = st.secrets["SERPER_API_KEY"]
+    h = {'X-API-KEY': s_key, 'Content-Type': 'application/json'}
+    if p == 1: state.links, state.images, state.videos, state.page, state.ai_history, state.chat_extra = [], [], [], 1, [], []
     
-    with st.spinner("КУСИЦА ищет в сети..."):
-        try:
-            with DDGS() as ddgs:
-                # Поиск только на русском (region='ru-ru')
-                state.links = [r for r in ddgs.text(q, region='ru-ru', max_results=20)]
-                state.images = [r for r in ddgs.images(q, region='ru-ru', max_results=15)]
-                state.videos = [r for r in ddgs.videos(q, region='ru-ru', max_results=12)]
-            
-            if state.links:
-                ctx = "\n".join([l.get('body','') for l in state.links[:3]])
-                ans = get_ai_res([{"role":"system","content":"Ты Кусица. Отвечай максимально подробно и только на русском."}, {"role":"user","content":f"Вопрос: {q}\nИнфо: {ctx}"}])
-                state.ai_history = [{"content": ans}]
-            
-            state.last_q = q
-        except: st.error("Ошибка поиска. Попробуйте снова через пару секунд.")
+    try:
+        # Поиск по РФ
+        r_t = requests.post("https://google.serper.dev/search", headers=h, json={"q": q, "hl": "ru", "gl": "ru", "page": p}).json()
+        state.links.extend(r_t.get('organic', []))
+        r_i = requests.post("https://google.serper.dev/images", headers=h, json={"q": q, "hl": "ru", "gl": "ru", "page": p}).json()
+        state.images.extend(r_i.get('images', []))
+        # Видео (Ru sites focus)
+        v_q = f"{q} site:rutube.ru OR site:vk.com OR site:dzen.ru"
+        r_v = requests.post("https://google.serper.dev/videos", headers=h, json={"q": v_q, "hl": "ru", "gl": "ru", "page": p}).json()
+        state.videos.extend(r_v.get('videos', []))
+        
+        if p == 1 and state.links:
+            ctx = "\n".join([l.get('snippet','') for l in state.links[:3]])
+            ans = get_ai_res([{"role":"system","content":"Ты Кусица. Отвечай подробно."}, {"role":"user","content":f"Вопрос: {q}\nИнфо: {ctx}"}])
+            state.ai_history = [{"content": ans}]
+        state.last_q, state.page = q, p
+    except: st.error("Ошибка связи")
 
 # --- ШАПКА ---
 d_s, t_s, w_m, u_v, e_v = get_header_data()
 col_l, col_i = st.columns([1, 4])
 with col_l:
     if st.button("КУСИЦА", key="logo_btn"):
-        for k in init_keys: state[k] = [] if 's' in k or 'history' in k or 'extra' in k else None
+        for k in init_keys: state[k] = [] if 's' in k or 'history' in k or 'extra' in k else 1
         st.query_params.clear(); st.rerun()
 
 with col_i:
@@ -111,11 +125,11 @@ with col_i:
 
 # --- ПОИСК ---
 url_query = st.query_params.get("q")
-if url_query and state.last_q != url_query: perform_search(url_query)
+if url_query and state.last_q != url_query: perform_search(url_query, 1)
 
 q_input = st.text_input("", value=url_query if url_query and not state.last_q else "", placeholder="Найдётся всё...", key="main_search", label_visibility="collapsed")
 if st.button("Найти ответ ➔") or (q_input and q_input != state.last_q):
-    perform_search(q_input)
+    perform_search(q_input, 1)
 
 # --- ПЕРЕВОДЧИК ---
 if q_input and "переводчик" in q_input.lower():
@@ -133,15 +147,16 @@ if q_input and "переводчик" in q_input.lower():
             st.text_area("Результат", value=res_t, height=100, key="to")
     st.markdown('</div>', unsafe_allow_html=True)
 
-# --- ВЫВОД ---
+# --- ВЫВОД РЕЗУЛЬТАТОВ ---
 if state.links:
     t1, t2, t3 = st.tabs(["🔍 Поиск", "🖼️ Картинки", "📺 Видео"])
+    
     with t1:
         if state.ai_history:
             st.markdown(f'<div class="alice-card"><b>🟣 КУСИЦА АССИСТЕНТ</b><br><br>{state.ai_history[0]["content"]}</div>', unsafe_allow_html=True)
             for chat in state.chat_extra:
-                st.markdown(f'<div style="background:#f0f2f5; padding:15px; border-radius:15px; margin-top:10px; border-left:4px solid #8e44ad;"><b>Вы:</b> {chat["q"]}<br><b>Кусица:</b> {chat["a"]}</div>', unsafe_allow_html=True)
-            u_q = st.text_input("Уточнить запрос...", key="follow_up")
+                st.markdown(f'<div class="chat-bubble"><b>Вы:</b> {chat["q"]}<br><b>Кусица:</b> {chat["a"]}</div>', unsafe_allow_html=True)
+            u_q = st.text_input("Уточнить запрос...", key="follow_up_input")
             if st.button("Спросить"):
                 if u_q:
                     new_a = get_ai_res([{"role":"assistant","content":state.ai_history[0]["content"]},{"role":"user","content":u_q}])
@@ -149,25 +164,27 @@ if state.links:
 
         st.write("---")
         for l in state.links:
-            dom = urlparse(l['href']).netloc
+            dom = urlparse(l['link']).netloc
             fav = f"https://www.google.com/s2/favicons?sz=64&domain_url={dom}"
             st.markdown(f"""
             <div class="result-item">
                 <span style="color:green; font-size:13px;">{dom}</span><br>
                 <img src="{fav}" class="favicon">
-                <a href="{l["href"]}" target="_blank" class="result-title">{l["title"]}</a>
-                <div style="font-size:14px; color:#444; margin-top:5px;">{l.get("body","")}</div>
+                <a href="{l["link"]}" target="_blank" class="result-title">{l["title"]}</a>
+                <div style="font-size:14px; color:#444; margin-top:5px;">{l.get("snippet","")}</div>
             </div>
             """, unsafe_allow_html=True)
+        if st.button("Показать еще ссылки"): perform_search(state.last_q, state.page + 1); st.rerun()
 
     with t2:
         if state.view_img_idx is not None:
             idx = state.view_img_idx
             img = state.images[idx]
-            st.button("⬅️ Назад", on_click=lambda: setattr(state, 'view_img_idx', None))
-            st.image(img['image'], use_container_width=True)
+            st.button("⬅️ Назад к сетке", on_click=lambda: setattr(state, 'view_img_idx', None))
+            st.image(img['imageUrl'], use_container_width=True)
             st.subheader(img.get('title',''))
-            st.link_button(f"🌐 На сайт", img['url'])
+            st.link_button(f"🌐 На сайт", img['link'])
+            if st.button("📩 В Мессенджер"): st.code(img['imageUrl'])
             c1, c2 = st.columns(2)
             with c1: 
                 if idx > 0 and st.button("◀️ Назад"): state.view_img_idx -= 1; st.rerun()
@@ -177,22 +194,37 @@ if state.links:
             cols = st.columns(2)
             for i, img in enumerate(state.images):
                 with cols[i % 2]:
-                    st.markdown(f'<img src="{img["image"]}" class="img-square">', unsafe_allow_html=True)
-                    if st.button(f"Увеличить #{i+1}", key=f"z_{i}"): state.view_img_idx = i; st.rerun()
+                    st.markdown(f'<img src="{img["imageUrl"]}" class="img-square">', unsafe_allow_html=True)
+                    if st.button(f"Увеличить #{i+1}", key=f"z_{i}"):
+                        state.view_img_idx = i; st.rerun()
+            if st.button("Больше картинок"): perform_search(state.last_q, state.page + 1); st.rerun()
 
     with t3:
         for v in state.videos:
-            st.markdown(f'<div class="video-row"><img src="{v.get("image","https://via.placeholder.com/110")}" class="video-thumb"><div><div style="font-size:16px; font-weight:bold;">{v["title"]}</div><div style="color:green; font-size:12px;">{v.get("source","Видео")}</div><a href="{v["content"]}" target="_blank" style="color:#1a0dab; font-size:14px; font-weight:bold;">▶️ Смотреть</a></div></div>', unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class="video-row">
+                <img src="{v.get('imageUrl','https://via.placeholder.com/100')}" class="video-thumb">
+                <div>
+                    <div style="font-size:16px; font-weight:bold;">{v['title']}</div>
+                    <div style="color:green; font-size:12px;">{v.get('source','Видео')}</div>
+                    <a href="{v['link']}" target="_blank" style="color:#1a0dab; font-size:14px; font-weight:bold;">▶️ Смотреть</a>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        if st.button("Больше видео"): perform_search(state.last_q, state.page + 1); st.rerun()
 
 else:
-    # НОВОСТИ
+    # ГЛАВНАЯ - НОВОСТИ
     st.write("---")
-    st.subheader("Главное сегодня в России")
+    st.subheader("Главное сегодня")
     try:
-        with DDGS() as ddgs:
-            news = [r for r in ddgs.news("новости России сегодня", region='ru-ru', max_results=6)]
-            for n in news:
-                st.markdown(f'<div style="padding:10px; border-bottom:1px solid #eee;"><a href="{n.get("url")}" target="_blank" style="color:#000; text-decoration:none;">📰 {n.get("title")}</a></div>', unsafe_allow_html=True)
+        n_res = requests.post("https://google.serper.dev/search", 
+                            headers={'X-API-KEY': st.secrets["SERPER_API_KEY"], 'Content-Type': 'application/json'}, 
+                            json={"q": "новости сегодня Россия", "gl": "ru", "hl": "ru", "tbm": "nws"}).json()
+        articles = n_res.get('news', []) or n_res.get('organic', [])
+        for n in articles[:6]:
+            st.markdown(f'<div style="padding:10px; border-bottom:1px solid #eee;"><a href="{n.get("link")}" target="_blank" style="color:#000; text-decoration:none;">📰 {n.get("title")}</a></div>', unsafe_allow_html=True)
     except: st.write("Новости загружаются...")
 
 st.markdown("<br><hr><center style='color:#ccc; font-size:10px;'>КУСИЦА 2024</center>", unsafe_allow_html=True)
+            
